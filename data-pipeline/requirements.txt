@@ -2,6 +2,8 @@ numpy
 pandas
 matplotlib
 seaborn
+dvc
+dvc-s3
 requests
 epiweeks
 pyarrow
