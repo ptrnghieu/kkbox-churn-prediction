@@ -12,8 +12,15 @@ STATES = [
     "sd","tn","tx","ut","vt","va","wa","wv","wi","wy"
 ]
 
-def fetch_raw_data(start_epiweek="201001", end_epiweek="202452"):
+def get_current_epiweek() -> str:
+    now = datetime.now()
+    week = now.isocalendar()[1]
+    return f"{now.year}{week:02d}"
+
+def fetch_raw_data(start_epiweek="201001"):
     """Fetch raw ILINet data from Delphi Epidata API."""
+    end_epiweek = get_current_epiweek()
+    print(f"Fetching {start_epiweek} → {end_epiweek}")
     resp = requests.get(
         "https://api.delphi.cmu.edu/epidata/fluview/",
         params={
@@ -127,5 +134,5 @@ def prepare_disease_features(
 
 
 if __name__ == "__main__":
-    raw_df = fetch_raw_data(start_epiweek="201001", end_epiweek="202452")
+    raw_df = fetch_raw_data(start_epiweek="201001")
     df = prepare_disease_features(raw_df)
