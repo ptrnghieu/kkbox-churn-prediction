@@ -2,5 +2,8 @@ numpy
 pandas
 matplotlib
 seaborn
+requests
+epiweeks
+pyarrow
 feast
 feast[redis]
