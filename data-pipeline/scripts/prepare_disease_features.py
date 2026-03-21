@@ -50,35 +50,34 @@ def prepare_disease_features(
 ) -> pd.DataFrame:
     """
     Transform raw ILINet API data into Feast-compatible feature Parquet.
-    Mirrors the blueprint's prepare_feast_data.py pattern exactly.
     """
     df = input_df.copy()
 
-    # 1. Drop columns we don't need
+    #Drop columns we don't need
     df = df.drop(columns=["release_date", "issue",
                            "num_age_0", "num_age_1", "num_age_2",
                            "num_age_3", "num_age_4", "num_age_5"])
 
-    # 2. Rename raw columns → clean feature names
+    #Rename raw columns → clean feature names
     df = df.rename(columns={
-        "region":        "region_id",
-        "num_ili":       "weekly_ili_cases",
-        "num_patients":  "total_patients_seen",
-        "num_providers": "provider_count",
-        "wili":          "weighted_ili_pct",
-        "ili":           "ili_pct",
-        "lag":           "reporting_lag_days",
+        "region":        "region_id",  #the geographic region
+        "num_ili":       "weekly_ili_cases", #the raw number of influenza-like cases reported
+        "num_patients":  "total_patients_seen", #the total number of patients seen by providers
+        "num_providers": "provider_count", #the total number of providers reporting data
+        "wili":          "weighted_ili_pct", #weighted ILI%: weighted by state population for national/regional estimates
+        "ili":           "ili_pct", #numili / num_patients, the raw percentage of patients with ILI symptoms
+        "lag":           "reporting_lag_days", 
     })
 
-    # 3. Add Feast-required timestamp columns
+    #Add Feast-required timestamp columns
     df["event_timestamp"] = df["epiweek"].apply(epiweek_to_date)
     df["created_timestamp"] = datetime.now(timezone.utc)
     df = df.drop(columns=["epiweek"])
 
-    # 4. Sort before computing rolling features
+    #Sort before computing rolling features
     df = df.sort_values(["region_id", "event_timestamp"]).reset_index(drop=True)
 
-    # 5. Engineer trend features (grouped by region)
+    #Engineer trend features (grouped by region)
     grp = df.groupby("region_id")["weekly_ili_cases"]
 
     df["rolling_4wk_avg"] = grp.transform(
@@ -91,19 +90,28 @@ def prepare_disease_features(
         lambda x: x.pct_change().fillna(0).replace([np.inf, -np.inf], 0)
     )
 
-    # 6. Compute outbreak risk score (z-score normalized 0–1)
+    #Compute outbreak risk score (z-score normalized 0–1)
     region_mean = grp.transform("mean")
     region_std  = grp.transform("std").fillna(1).replace(0, 1)
     df["outbreak_risk_score"] = (
         (df["weekly_ili_cases"] - region_mean) / region_std
     ).clip(0, 5) / 5
 
-    # 7. Derive binary target label: 1 if cases > mean + 2*std
+    #Derive binary target label: 1 if cases > mean + 2*std
     df["outbreak_flag"] = (
         df["weekly_ili_cases"] > region_mean + 2 * region_std
     ).astype(int)
 
-    # 8. Final column order
+    df['week_of_year'] = df['event_timestamp'].dt.isocalendar().week.astype(int)
+    df['is_flu_season'] = df['week_of_year'].apply(
+        lambda w: 1 if (w >= 40 or w <= 20) else 0 #Oct - Mar
+    )
+
+    #Cyclical encoding so model understands week 52 and week 1 are close
+    df['week_sin'] = np.sin(2 * np.pi * df['week_of_year'] / 52)
+    df['week_cos'] = np.cos(2 * np.pi * df['week_of_year'] / 52)
+
+    #Final column order
     feast_cols = [
         "region_id",
         "event_timestamp",
@@ -119,10 +127,14 @@ def prepare_disease_features(
         "week_over_week_pct_change",
         "outbreak_risk_score",
         "outbreak_flag",
+        "week_of_year",
+        "is_flu_season",
+        "week_sin",
+        "week_cos",
     ]
     df = df[feast_cols]
 
-    # 9. Save
+    #Save
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_parquet(output_path, index=False)
     print(f"Saved: {output_path}")

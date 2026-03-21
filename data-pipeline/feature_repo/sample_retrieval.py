@@ -16,6 +16,11 @@ df = store.get_online_features(
         "disease_trend_features:rolling_4wk_avg",
         "disease_trend_features:outbreak_risk_score",
         "disease_trend_features:outbreak_flag",
+        "disease_trend_features:week_of_year",
+        "disease_trend_features:is_flu_season",
+        "disease_trend_features:week_sin",
+        "disease_trend_features:week_cos",
+
     ],
 ).to_df()
 
