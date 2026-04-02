@@ -1,0 +1,5 @@
+outs:
+- md5: e19e8af0e8ffa081e41b00bba9f9e9d1
+  size: 885845
+  hash: md5
+  path: noaa.parquet
