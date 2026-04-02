@@ -1,0 +1,5 @@
+outs:
+- md5: caea41d4bd053a807d76ce7b0987e12b
+  size: 46618450
+  hash: md5
+  path: covidcast.parquet

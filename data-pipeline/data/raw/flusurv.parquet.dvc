@@ -1,0 +1,5 @@
+outs:
+- md5: 0d0d87b6cb82959f8aacb3b7a830fcec
+  size: 223628
+  hash: md5
+  path: flusurv.parquet

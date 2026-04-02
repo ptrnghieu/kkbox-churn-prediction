@@ -1,0 +1,5 @@
+outs:
+- md5: db17e670ed1bf9d2129ed53630f0ddcf
+  size: 1068517
+  hash: md5
+  path: ilinet.parquet

@@ -1,6 +1,4 @@
-# Data files — versioned via DVC, not git
-data/
-feature_repo/data/*.parquet
+# Data files — DVC manages .gitignore inside these dirs after dvc add
 feature_repo/data/registry.db
 
 # Byte-compiled / optimized / DLL files
