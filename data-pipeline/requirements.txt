@@ -1,11 +1,16 @@
-numpy
-pandas
-matplotlib
-seaborn
-dvc
-dvc-s3
-requests
-epiweeks
-pyarrow
-feast
-feast[redis]
+numpy==1.26.4
+pandas==2.2.2
+matplotlib==3.9.0
+seaborn==0.13.2
+pyarrow==16.1.0
+requests==2.32.3
+epiweeks==2.1.1
+
+# Data versioning
+dvc==3.51.2
+dvc-s3==3.2.0
+
+# Feature store
+feast==0.40.0
+feast[redis]==0.40.0
+

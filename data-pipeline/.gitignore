@@ -1,4 +1,7 @@
-data\raw
+# Data files — versioned via DVC, not git
+data/
+feature_repo/data/*.parquet
+feature_repo/data/registry.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

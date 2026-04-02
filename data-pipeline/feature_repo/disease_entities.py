@@ -1,10 +1,7 @@
-from feast import Entity
-from feast.value_type import ValueType
+from feast import Entity, ValueType
 
 region = Entity(
-    name="region",
-    description="US state region code (e.g. 'ca', 'ny')",
-    join_keys=["region_id"],
+    name="region_id",
     value_type=ValueType.STRING,
-    tags={"owner": "data_team", "domain": "disease_surveillance"}
+    description="2-letter lowercase US state code (e.g. 'ca', 'ny')",
 )
