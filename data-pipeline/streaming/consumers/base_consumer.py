@@ -2,7 +2,7 @@ import time
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 
-from kafka.config import KAFKA_BOOTSTRAP_SERVERS, CONSUMER_GROUP_ID
+from streaming.config import KAFKA_BOOTSTRAP_SERVERS, CONSUMER_GROUP_ID
 
 
 class BaseConsumer:

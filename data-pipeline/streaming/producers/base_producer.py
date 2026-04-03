@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 
-from kafka.config import KAFKA_BOOTSTRAP_SERVERS
+from streaming.config import KAFKA_BOOTSTRAP_SERVERS
 
 
 class BaseProducer:

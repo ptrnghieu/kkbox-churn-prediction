@@ -8,8 +8,8 @@ import requests
 from datetime import datetime, timezone
 from epiweeks import Week
 
-from kafka.config import TOPICS
-from kafka.producers.base_producer import BaseProducer
+from streaming.config import TOPICS
+from streaming.producers.base_producer import BaseProducer
 
 EPIDATA_ENDPOINT = "https://api.delphi.cmu.edu/epidata/fluview/"
 
@@ -26,7 +26,8 @@ class ILINetProducer(BaseProducer):
         start = current_week - 2
         end   = current_week
 
-        epiweeks = f"{int(start)}-{int(end)}"
+        def _fmt(w): return w.year * 100 + w.week
+        epiweeks = f"{_fmt(start)}-{_fmt(end)}"
 
         resp = requests.get(
             EPIDATA_ENDPOINT,

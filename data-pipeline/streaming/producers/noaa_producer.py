@@ -7,8 +7,8 @@ import time
 import requests
 from datetime import datetime, timezone, timedelta
 
-from kafka.config import TOPICS
-from kafka.producers.base_producer import BaseProducer
+from streaming.config import TOPICS
+from streaming.producers.base_producer import BaseProducer
 
 OPEN_METEO_ENDPOINT = "https://archive-api.open-meteo.com/v1/archive"
 

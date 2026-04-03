@@ -6,8 +6,8 @@ Runs daily (triggered by Airflow). Fetches 3 days to handle typical 1-2 day lag.
 import requests
 from datetime import datetime, timezone, timedelta
 
-from kafka.config import TOPICS
-from kafka.producers.base_producer import BaseProducer
+from streaming.config import TOPICS
+from streaming.producers.base_producer import BaseProducer
 
 COVIDCAST_ENDPOINT = "https://api.delphi.cmu.edu/epidata/covidcast/"
 
@@ -23,9 +23,10 @@ class COVIDcastProducer(BaseProducer):
     topic  = TOPICS["covidcast"]
 
     def fetch_latest(self) -> list[dict]:
-        """Fetch the last 3 days of all COVIDcast signals for all states."""
+        """Fetch the last 10 days of all COVIDcast signals for all states.
+        COVIDcast signals have a 5-7 day reporting lag so 3 days is too short."""
         today     = datetime.now(timezone.utc).date()
-        start_day = (today - timedelta(days=3)).strftime("%Y%m%d")
+        start_day = (today - timedelta(days=10)).strftime("%Y%m%d")
         end_day   = today.strftime("%Y%m%d")
 
         all_records: dict[tuple, dict] = {}  # (geo_value, time_value) → record

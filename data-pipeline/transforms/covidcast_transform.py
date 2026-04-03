@@ -13,38 +13,30 @@ SIGNAL_COL_MAP: dict[tuple, str] = {
 
 def _bronze_to_silver(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Normalize state-level COVIDcast signals from long to wide format.
+    Normalize state-level COVIDcast signals to silver format.
 
-    Since ingestion already fetches at geo_type="state", no county→state
-    aggregation is needed here. Steps:
-      - Map geo_value (state abbrev) → region_id
-      - Parse time_value (int YYYYMMDD) → event_timestamp UTC
-      - Map (data_source, signal) → clean column name
-      - Pivot from long (one row per signal) to wide (one column per signal)
+    The producer already pivots to wide format (one row per state/date,
+    one column per signal), so bronze schema is:
+      region_id, date (YYYYMMDD str), <signal columns>, kafka_published_at
+
+    Steps:
+      - Parse date → event_timestamp UTC
+      - Ensure all signal columns exist
     """
     df = df.copy()
 
-    df["region_id"] = df["geo_value"].str.lower().str.strip()
-    df["event_timestamp"] = pd.to_datetime(df["time_value"].astype(str), format="%Y%m%d", utc=True)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-
-    df["col_name"] = df.apply(
-        lambda r: SIGNAL_COL_MAP.get((r["data_source"], r["signal"])), axis=1
-    )
-    df = df.dropna(subset=["col_name"])
-
-    wide = df.pivot_table(
-        index=["region_id", "event_timestamp"],
-        columns="col_name",
-        values="value",
-        aggfunc="first",
-    ).reset_index()
-    wide.columns.name = None
+    df["region_id"] = df["region_id"].str.lower().str.strip()
+    df["event_timestamp"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d", utc=True)
 
     # Ensure all expected signal columns exist even if data was missing
     for col in SIGNAL_COL_MAP.values():
-        if col not in wide.columns:
-            wide[col] = np.nan
+        if col not in df.columns:
+            df[col] = np.nan
+        else:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    wide = df[["region_id", "event_timestamp"] + list(SIGNAL_COL_MAP.values())].copy()
+    wide = wide.drop_duplicates(subset=["region_id", "event_timestamp"])
 
     wide["created_timestamp"] = datetime.now(timezone.utc)
     wide = wide.sort_values(["region_id", "event_timestamp"]).reset_index(drop=True)
