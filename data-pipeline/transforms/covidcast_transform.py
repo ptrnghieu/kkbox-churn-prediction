@@ -15,20 +15,39 @@ def _bronze_to_silver(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize state-level COVIDcast signals to silver format.
 
-    The producer already pivots to wide format (one row per state/date,
-    one column per signal), so bronze schema is:
-      region_id, date (YYYYMMDD str), <signal columns>, kafka_published_at
+    Handles two input schemas:
+      - Batch (ingestion/covidcast.py): long format with geo_value, time_value,
+        data_source, signal, value columns — one row per (state, date, signal).
+      - Streaming (Kafka producer): wide format with region_id, date columns —
+        one row per (state, date), one column per signal.
 
-    Steps:
-      - Parse date → event_timestamp UTC
-      - Ensure all signal columns exist
+    Output: wide format with region_id, event_timestamp, one column per signal.
     """
     df = df.copy()
+
+    # --- Batch path: long format from ingestion/covidcast.py ---
+    if "geo_value" in df.columns:
+        df = df.rename(columns={"geo_value": "region_id", "time_value": "date"})
+        # Pivot long → wide: one column per signal
+        signal_key = df[["data_source", "signal"]].apply(
+            lambda r: (r["data_source"], r["signal"]), axis=1
+        )
+        df["signal_col"] = signal_key.map(SIGNAL_COL_MAP)
+        # Drop rows whose signal isn't in our map (shouldn't happen, but safe)
+        df = df.dropna(subset=["signal_col"])
+        wide = df.pivot_table(
+            index=["region_id", "date"],
+            columns="signal_col",
+            values="value",
+            aggfunc="mean",
+        ).reset_index()
+        wide.columns.name = None
+        df = wide
 
     df["region_id"] = df["region_id"].str.lower().str.strip()
     df["event_timestamp"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d", utc=True)
 
-    # Ensure all expected signal columns exist even if data was missing
+    # Ensure all expected signal columns exist even if a signal had no data
     for col in SIGNAL_COL_MAP.values():
         if col not in df.columns:
             df[col] = np.nan
