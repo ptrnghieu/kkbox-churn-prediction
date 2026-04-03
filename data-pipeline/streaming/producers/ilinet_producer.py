@@ -47,13 +47,14 @@ class ILINetProducer(BaseProducer):
         records = []
         for row in data.get("epidata", []):
             records.append({
-                "region_id":          row.get("region", "").lower(),
-                "epiweek":            str(row.get("epiweek")),
-                "weekly_ili_cases":   row.get("ili"),
-                "total_patients":     row.get("num_patients"),
-                "provider_count":     row.get("num_providers"),
-                "weighted_ili_pct":   row.get("wili"),
-                "ili_pct":            row.get("ili"),
+                "region":        row.get("region", "").lower(),
+                "epiweek":       row.get("epiweek"),
+                "num_ili":       row.get("num_ili"),
+                "num_patients":  row.get("num_patients"),
+                "num_providers": row.get("num_providers"),
+                "wili":          row.get("wili"),
+                "ili":           row.get("ili"),
+                "lag":           row.get("lag"),
             })
 
         print(f"[ilinet] Fetched {len(records)} records for epiweeks {epiweeks}")

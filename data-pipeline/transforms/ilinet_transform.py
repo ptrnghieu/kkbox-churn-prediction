@@ -21,7 +21,7 @@ def _bronze_to_silver(df: pd.DataFrame) -> pd.DataFrame:
         "release_date", "issue",
         "num_age_0", "num_age_1", "num_age_2",
         "num_age_3", "num_age_4", "num_age_5",
-    ])
+    ], errors="ignore")  # streaming bronze won't have these batch-only columns
 
     df = df.rename(columns={
         "region":        "region_id",

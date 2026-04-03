@@ -13,7 +13,6 @@ import os
 import subprocess
 import pandas as pd
 import boto3
-from botocore.exceptions import ClientError
 from datetime import datetime, timezone
 
 from streaming.config import TOPICS, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_RAW
@@ -72,8 +71,14 @@ def _upload_to_minio(s3, combined_df: pd.DataFrame, bucket: str, key: str) -> No
     buf = io.BytesIO()
     combined_df.to_parquet(buf, index=False)
     buf.seek(0)
-    s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
-    print(f"[consumer] Uploaded {len(combined_df)} rows → s3://{bucket}/{key}")
+    try:
+        s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+        print(f"[consumer] Uploaded {len(combined_df)} rows → s3://{bucket}/{key}")
+    except Exception as e:
+        print(f"[consumer] MinIO upload warning (non-fatal): {e}")
+
+
+_DATA_PIPELINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _run_transform(source: str) -> None:
@@ -82,7 +87,8 @@ def _run_transform(source: str) -> None:
     print(f"[consumer] Running transform: {module}")
     result = subprocess.run(
         ["python", "-m", module],
-        capture_output=True, text=True
+        capture_output=True, text=True,
+        cwd=_DATA_PIPELINE_DIR,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Transform failed for {source}:\n{result.stderr}")
@@ -95,7 +101,8 @@ def _update_feast() -> None:
     print(f"[consumer] Running feast materialize-incremental {end_ts}")
     result = subprocess.run(
         ["feast", "-c", "feature_repo", "materialize-incremental", end_ts],
-        capture_output=True, text=True
+        capture_output=True, text=True,
+        cwd=_DATA_PIPELINE_DIR,
     )
     if result.returncode != 0:
         print(f"[consumer] feast warning: {result.stderr.strip()}")
