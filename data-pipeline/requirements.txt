@@ -14,3 +14,7 @@ dvc-s3==3.2.0
 feast==0.40.0
 feast[redis]==0.40.0
 
+# Kafka streaming
+kafka-python==2.0.2
+boto3==1.28.0
+
