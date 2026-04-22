@@ -1,0 +1,36 @@
+# Secrets
+.env
+CLAUDE.local.md
+CLAUDE.md
+.claude/
+credentials/
+*.key
+*.pem
+
+# Python
+*.pyc
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Coverage
+.coverage
+htmlcov/
+
+# MLflow
+mlflow/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
