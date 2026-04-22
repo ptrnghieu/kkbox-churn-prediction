@@ -1,11 +1,14 @@
 """FastAPI application entry point."""
 from fastapi import FastAPI
-from serving_pipeline.app.routers import predict, health
+from serving_pipeline.app.predict import router as predict_router
 
 app = FastAPI(
     title="KKBox Churn Prediction API",
     version="1.0.0",
 )
 
-app.include_router(health.router)
-app.include_router(predict.router, prefix="/predict")
+@app.get("/health", tags=["Health Check"])
+def health_check():
+    return {"status": "healthy"}
+
+app.include_router(predict_router, prefix="/predict")
