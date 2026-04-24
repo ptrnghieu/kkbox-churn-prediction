@@ -1,6 +1,6 @@
 """FastAPI application entry point."""
 from fastapi import FastAPI
-from serving_pipeline.app.predict import router as predict_router
+from app.predict import router as predict_router
 
 app = FastAPI(
     title="KKBox Churn Prediction API",
