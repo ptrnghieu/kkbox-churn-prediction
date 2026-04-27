@@ -1,0 +1,5 @@
+evidently
+prometheus_client
+# feast[gcp,redis]
+fastapi
+uvicorn
