@@ -1,6 +1,8 @@
 from feast import FeatureView, Field
 from feast.types import Int64, Float32, String
 from feast.infra.offline_stores.bigquery_source import BigQuerySource
+
+from entities import msno
 from datetime import timedelta
 from dotenv import load_dotenv
 import os
@@ -16,10 +18,9 @@ feature_source = BigQuerySource(
     timestamp_field="event_timestamp"        # table bigquery phai co, fix sau
 )
 
-# 3. FeatureView
 kkbox_fv = FeatureView(
     name="kkbox_features",
-    entities=["msno"],
+    entities=[msno],
     ttl=timedelta(days=30),
     schema=[
         # member

@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  # s3:
+  #   image: minio/minio
+  #   container_name: mlflow_minio
+  #   ports:
+  #     - "9000:9000" # API port
+  #     - "9001:9001" # Console UI port
+  #   environment:
+  #     - MINIO_ROOT_USER=admin
+  #     - MINIO_ROOT_PASSWORD=password
+  #   command: server /data --console-address ":9001"
+  #  store raw ingestion data
+  #  mlflow uses by "--default-artifact-root s3://mlflow-bucket/" in mlflow service's command
+
+  # postgres:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_DB: mlflow
+  #     POSTGRES_USER: mlflow
+  #     POSTGRES_PASSWORD: mlflow
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   use by  "--backend-store-uri ${DB_URI}" in mlflow service's command
+
+  redis:
+    image: redis:7.2-alpine
+    ports: ["6379:6379"]
+
+  feast:
+    build: ./feature_store
+    depends_on: [redis, kafka]
+    env_file: ./.env
+    volumes: ["./feature_store/feature_store.yaml:/app/feature_store.yaml"]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mlflow_server
+    # depends_on:
+    #   - postgres
+    #   - s3
+    ports:
+      - "5000:5000"
+    # environment:
+    #   - DB_URI=postgresql://mlflow:mlflow@db:5432/mlflow
+    volumes:
+      - ./artifacts:/mlflow/artifacts
+      - ./mlflow.db:/mlflow/mlflow.db
+    networks:
+      - churn-network
+    command: >
+      mlflow server 
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0 
+      --port 5000
+  api_serving:
+    build: ./serving_pipeline
+    depends_on: [feast, mlflow]
+    env_file: ./.env
+    environment:
+      FEAST_REPO_PATH: /app/feature_store
+    ports: ["8000:8000"]
+    volumes:
+      - ./feature_store:/app/feature_store
+    networks:
+      - churn-network
+networks:
+  churn-network:
+    driver: bridge

@@ -2,4 +2,6 @@ fastapi
 uvicorn
 pydantic
 scikit-learn
-feast
+feast[gcp,redis]
+python-dotenv
+prometheus_client
