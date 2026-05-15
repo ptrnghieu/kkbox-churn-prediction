@@ -54,6 +54,7 @@ make test
 - Online Store: Redis
 - How to set up:
   cd serving_pipeline
+  venv\Scripts\activate or source venv/bin/activate
   feast -c ../feature_store apply
 
 ## API serving

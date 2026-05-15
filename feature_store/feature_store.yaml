@@ -1,10 +1,14 @@
 project: kkbox_churn
 
 registry: data/registry.db
-provider: gcp
+# provider: gcp
+provider: local
+
+# offline_store:
+#   type: bigquery
 
 offline_store:
-  type: bigquery
+  type: file
 
 online_store:
   type: redis

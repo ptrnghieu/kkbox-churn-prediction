@@ -15,7 +15,26 @@ class PredictionService:
 
         self.store = FeatureStore(repo_path=repo_path)
         self.feature_refs = [
-            # "placeholder:placeholder_feature"  # Replace with actual feature references
+            "kkbox_features:city",
+            "kkbox_features:bd",
+            "kkbox_features:gender",
+
+            "kkbox_features:registered_via",
+            "kkbox_features:total_transactions",
+            "kkbox_features:total_amount_paid",
+            "kkbox_features:avg_amount_paid",
+            "kkbox_features:auto_renew_count",
+            "kkbox_features:cancel_count",
+
+            "kkbox_features:total_log_days",
+            "kkbox_features:total_secs",
+            "kkbox_features:avg_daily_secs",
+            "kkbox_features:total_num_25",
+            "kkbox_features:total_num_50",
+            "kkbox_features:total_num_75",
+            "kkbox_features:total_num_985",
+            "kkbox_features:total_num_100",
+            "kkbox_features:total_num_unq",
         ]
 
     def _get_features(self, msno: str) -> dict:
