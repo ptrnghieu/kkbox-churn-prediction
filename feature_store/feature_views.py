@@ -1,6 +1,7 @@
-from feast import FeatureView, Field
+from feast import FeatureView, Field, FileSource
 from feast.types import Int64, Float32, String
 from feast.infra.offline_stores.bigquery_source import BigQuerySource
+
 
 from entities import msno
 from datetime import timedelta
@@ -13,9 +14,14 @@ GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 BQ_DATASET = os.getenv("BQ_DATASET")
 TABLE_NAME = os.getenv("TABLE_NAME", "features")
 
-feature_source = BigQuerySource(
-    table=f"{GCP_PROJECT_ID}.{BQ_DATASET}.{TABLE_NAME}",
-    timestamp_field="event_timestamp"        # table bigquery phai co, fix sau
+# feature_source = BigQuerySource(
+#     table=f"{GCP_PROJECT_ID}.{BQ_DATASET}.{TABLE_NAME}",
+#     timestamp_field="event_timestamp"        # table bigquery phai co, fix sau
+# )
+
+feature_source = FileSource(
+    path="../data/features.parquet",
+    timestamp_field="event_timestamp",
 )
 
 kkbox_fv = FeatureView(
