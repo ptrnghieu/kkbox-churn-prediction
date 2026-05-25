@@ -1,20 +1,8 @@
 project: kkbox_churn
-
 registry: data/registry.db
-# provider: gcp
-provider: local
-
-# offline_store:
-#   type: bigquery
-
+provider: gcp
 offline_store:
-  type: file
-
+  type: bigquery
 online_store:
   type: redis
-
-  # local
-  # connection_string: "localhost:6379"
-
-  # docker
   connection_string: "redis:6379"
