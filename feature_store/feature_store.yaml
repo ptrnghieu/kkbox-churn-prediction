@@ -1,5 +1,5 @@
 project: kkbox_churn
-registry: data/registry.db
+registry: gs://kkbox-churn-prediction-493716-data/feast/registry.db
 provider: gcp
 offline_store:
   type: bigquery
