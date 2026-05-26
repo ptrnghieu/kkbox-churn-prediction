@@ -184,12 +184,15 @@ def train(
     log.info("scale_pos_weight: %.2f", scale_pos_weight)
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
-    # Create experiment with GCS artifact location if it doesn't exist yet
+    # Must create experiment with GCS artifact_location BEFORE set_experiment,
+    # otherwise set_experiment auto-creates it with local artifact location.
     experiment = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT)
     if experiment is None:
         mlflow.create_experiment(MLFLOW_EXPERIMENT, artifact_location=MLFLOW_ARTIFACT_ROOT)
+        log.info("Created experiment '%s' with artifact store: %s", MLFLOW_EXPERIMENT, MLFLOW_ARTIFACT_ROOT)
+
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     with mlflow.start_run(run_name="xgboost_baseline") as run:
         model = xgb.XGBClassifier(**params, scale_pos_weight=scale_pos_weight)
@@ -247,6 +250,30 @@ def train(
             registered_model_name=REGISTERED_MODEL_NAME,
         )
 
+        # Save to a fixed GCS path so the serving API can load without
+        # depending on MLflow registry (ephemeral on Colab).
+        # XGBoost doesn't support GCS paths directly — save locally then upload.
+        import json as _json
+        import tempfile
+        from google.cloud import storage as _gcs
+
+        _client = _gcs.Client(project=PROJECT_ID)
+        _bucket = _client.bucket(GCS_BUCKET)
+        _prefix = "models/kkbox-churn-xgboost"
+
+        with tempfile.NamedTemporaryFile(suffix=".ubj", delete=False) as tmp:
+            model.save_model(tmp.name)
+            _bucket.blob(f"{_prefix}/model.ubj").upload_from_filename(tmp.name)
+
+        _bucket.blob(f"{_prefix}/preprocessing_config.json").upload_from_string(
+            _json.dumps(preprocessing_config)
+        )
+        _bucket.blob(f"{_prefix}/feature_cols.json").upload_from_string(
+            _json.dumps({"feature_cols": FEATURE_COLS})
+        )
+        _bucket.blob(f"{_prefix}/run_id.txt").upload_from_string(run.info.run_id)
+
+        log.info("Model artifacts saved to: gs://%s/%s", GCS_BUCKET, _prefix)
         log.info("MLflow run ID: %s", run.info.run_id)
 
 
