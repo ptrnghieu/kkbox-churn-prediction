@@ -5,4 +5,13 @@ offline_store:
   type: bigquery
 online_store:
   type: redis
+<<<<<<< HEAD
+
+  # local
+  connection_string: "localhost:6379"
+
+  # docker
+  # connection_string: "redis:6379"
+=======
   connection_string: "10.80.68.19:6379"
+>>>>>>> 23a6bda890317f2f43ef6094774f0b93b58ed025
