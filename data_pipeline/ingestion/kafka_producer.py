@@ -1,20 +1,24 @@
 """
 Kafka Producer — Historical Playback Streaming
 
-Replays Silver-layer data after START_DATE to Kafka topics in chronological
-order, simulating a real-time streaming environment.
+Replays Bronze-layer _v2 CSV files (2017 data) to Kafka topics in
+chronological order, simulating real-time data ingestion.
+
+Architecture:
+  GCS Bronze (_v2 CSVs) → Kafka → Consumer → GCS Bronze → Spark → Silver → Gold → Feast
 
 Topics:
   kkbox.user_logs    — daily listening activity per user
   kkbox.transactions — subscription transactions per user
 
-Silver layout on GCS:
-  silver/user_logs/date=YYYY-MM-DD/*.parquet   (partitioned by date)
-  silver/transactions/*.parquet                 (filtered by transaction_date)
+Bronze files streamed:
+  bronze/raw/user_logs_v2.csv    (1.3 GB — 2017 listening logs)
+  bronze/raw/transactions_v2.csv (110 MB — 2017 transactions)
 """
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import logging
 import os
@@ -38,63 +42,35 @@ KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPIC_USER_LOGS = "kkbox.user_logs"
 TOPIC_TRANSACTIONS = "kkbox.transactions"
 
-SILVER_USER_LOGS_PREFIX = "silver/user_logs"
-SILVER_TRANSACTIONS_PREFIX = "silver/transactions"
+BRONZE_PREFIX = "bronze/raw"
+USER_LOGS_V2 = f"{BRONZE_PREFIX}/user_logs_v2.csv"
+TRANSACTIONS_V2 = f"{BRONZE_PREFIX}/transactions_v2.csv"
 
-# Data before this date is used for training (features_train snapshot)
-PLAYBACK_START_DATE = date(2017, 1, 1)
+# Date column values in Bronze are INTEGER yyyyMMdd
+DATE_FORMAT = "%Y%m%d"
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
 
 def _serialize(value: dict) -> bytes:
-    """Serialize a dict to JSON bytes, handling date/NaN/NA types."""
     def _default(obj):
         if isinstance(obj, (date, datetime)):
             return obj.isoformat()
         if pd.isna(obj):
             return None
-        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
+        raise TypeError(f"Not serializable: {type(obj)}")
     return json.dumps(value, default=_default).encode("utf-8")
 
 
 # ── GCS helpers ───────────────────────────────────────────────────────────────
 
-def _list_user_log_dates(client: gcs.Client, start: date) -> list[date]:
-    """Return sorted list of dates in silver/user_logs/ that are >= start."""
+def _download_csv(client: gcs.Client, blob_path: str) -> pd.DataFrame:
+    log.info("Downloading gs://%s/%s ...", GCS_BUCKET, blob_path)
     bucket = client.bucket(GCS_BUCKET)
-    blobs = client.list_blobs(GCS_BUCKET, prefix=f"{SILVER_USER_LOGS_PREFIX}/date=")
-    seen: set[date] = set()
-    for blob in blobs:
-        # blob.name: silver/user_logs/date=2017-01-15/part-0000.parquet
-        part = blob.name.split("/")
-        for segment in part:
-            if segment.startswith("date="):
-                try:
-                    d = date.fromisoformat(segment[5:])
-                    if d >= start:
-                        seen.add(d)
-                except ValueError:
-                    pass
-    return sorted(seen)
-
-
-def _read_parquet_prefix(client: gcs.Client, prefix: str) -> pd.DataFrame:
-    """Download all parquet files under a GCS prefix and concatenate."""
-    import io
-    import pyarrow.parquet as pq
-
-    bucket = client.bucket(GCS_BUCKET)
-    blobs = [b for b in client.list_blobs(GCS_BUCKET, prefix=prefix) if b.name.endswith(".parquet")]
-    if not blobs:
-        return pd.DataFrame()
-
-    frames = []
-    for blob in blobs:
-        data = blob.download_as_bytes()
-        frames.append(pq.read_table(io.BytesIO(data)).to_pandas())
-    return pd.concat(frames, ignore_index=True)
+    data = bucket.blob(blob_path).download_as_bytes()
+    df = pd.read_csv(io.BytesIO(data))
+    log.info("Downloaded %s — shape: %s", blob_path.split("/")[-1], df.shape)
+    return df
 
 
 # ── Producer helpers ──────────────────────────────────────────────────────────
@@ -114,74 +90,67 @@ def _send(producer: KafkaProducer, topic: str, key: str, record: dict) -> None:
     try:
         future.get(timeout=10)
     except KafkaError:
-        log.exception("Failed to send message to %s key=%s", topic, key)
+        log.exception("Failed to send to %s key=%s", topic, key)
 
 
 # ── Replay logic ──────────────────────────────────────────────────────────────
 
-def replay(start: date, speed: float, dry_run: bool) -> None:
+def replay(speed: float, dry_run: bool) -> None:
     """
-    Main replay loop — process one day at a time.
+    Main replay loop — process one day at a time in chronological order.
 
     Args:
-        start:   First date to replay (default 2017-01-01).
         speed:   Seconds to sleep between days. 0 = full speed.
-        dry_run: If True, log messages without sending to Kafka.
+        dry_run: Log messages without sending to Kafka.
     """
     gcs_client = gcs.Client(project=GCP_PROJECT_ID)
 
-    log.info("Discovering date partitions in Silver user_logs >= %s ...", start)
-    dates = _list_user_log_dates(gcs_client, start)
-    log.info("Found %d date partitions to replay", len(dates))
-    if not dates:
-        log.warning("No data found after %s — nothing to replay.", start)
-        return
+    # Load both files upfront (1.3 GB + 110 MB)
+    user_logs = _download_csv(gcs_client, USER_LOGS_V2)
+    transactions = _download_csv(gcs_client, TRANSACTIONS_V2)
 
-    log.info("Loading transactions from Silver (filter >= %s)...", start)
-    txn_all = _read_parquet_prefix(gcs_client, SILVER_TRANSACTIONS_PREFIX)
-    if not txn_all.empty:
-        txn_all["transaction_date"] = pd.to_datetime(txn_all["transaction_date"]).dt.date
-        txn_all = txn_all[txn_all["transaction_date"] >= start].sort_values("transaction_date")
-        txn_by_date = dict(tuple(txn_all.groupby("transaction_date")))
-        log.info("Transactions to replay: %d across %d dates", len(txn_all), len(txn_by_date))
-    else:
-        txn_by_date = {}
-        log.warning("No transactions found in Silver layer.")
+    # Parse date columns (INTEGER yyyyMMdd → date)
+    user_logs["date"] = pd.to_datetime(user_logs["date"].astype(str), format=DATE_FORMAT).dt.date
+    transactions["transaction_date"] = pd.to_datetime(
+        transactions["transaction_date"].astype(str), format=DATE_FORMAT
+    ).dt.date
+
+    # Build per-date groups
+    logs_by_date = dict(tuple(user_logs.groupby("date")))
+    txn_by_date = dict(tuple(transactions.groupby("transaction_date")))
+
+    all_dates = sorted(set(logs_by_date) | set(txn_by_date))
+    log.info("Dates to replay: %d  (%s → %s)", len(all_dates), all_dates[0], all_dates[-1])
 
     producer = None if dry_run else _make_producer()
 
-    total_logs_sent = 0
-    total_txn_sent = 0
+    total_logs = 0
+    total_txn = 0
 
-    for current_date in dates:
-        log.info("--- Replaying date: %s ---", current_date)
+    for current_date in all_dates:
+        log.info("--- %s ---", current_date)
 
-        # user_logs for this date
-        prefix = f"{SILVER_USER_LOGS_PREFIX}/date={current_date}"
-        logs_df = _read_parquet_prefix(gcs_client, prefix)
-        for record in logs_df.to_dict(orient="records"):
-            record["date"] = current_date.isoformat()
-            if dry_run:
-                log.debug("DRY-RUN user_log: msno=%s", record.get("msno"))
-            else:
-                _send(producer, TOPIC_USER_LOGS, record.get("msno"), record)
-        total_logs_sent += len(logs_df)
-        log.info("  user_logs sent: %d", len(logs_df))
+        # user_logs
+        if current_date in logs_by_date:
+            records = logs_by_date[current_date].to_dict(orient="records")
+            for record in records:
+                record["date"] = current_date.isoformat()
+                if not dry_run:
+                    _send(producer, TOPIC_USER_LOGS, record.get("msno"), record)
+            total_logs += len(records)
+            log.info("  user_logs:    %d", len(records))
 
-        # transactions for this date
+        # transactions
         if current_date in txn_by_date:
-            txn_today = txn_by_date[current_date]
-            for record in txn_today.to_dict(orient="records"):
+            records = txn_by_date[current_date].to_dict(orient="records")
+            for record in records:
                 record["transaction_date"] = current_date.isoformat()
-                if dry_run:
-                    log.debug("DRY-RUN transaction: msno=%s", record.get("msno"))
-                else:
+                if not dry_run:
                     _send(producer, TOPIC_TRANSACTIONS, record.get("msno"), record)
-            total_txn_sent += len(txn_today)
-            log.info("  transactions sent: %d", len(txn_today))
+            total_txn += len(records)
+            log.info("  transactions: %d", len(records))
 
         if speed > 0:
-            log.info("  Sleeping %.1fs before next day...", speed)
             time.sleep(speed)
 
     if producer:
@@ -189,20 +158,14 @@ def replay(start: date, speed: float, dry_run: bool) -> None:
         producer.close()
 
     log.info("=== Replay complete ===")
-    log.info("Total user_log records sent: %d", total_logs_sent)
-    log.info("Total transaction records sent: %d", total_txn_sent)
+    log.info("Total user_log records : %d", total_logs)
+    log.info("Total transaction records: %d", total_txn)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="KKBox historical playback Kafka producer")
-    p.add_argument(
-        "--start-date",
-        type=date.fromisoformat,
-        default=PLAYBACK_START_DATE,
-        help="First date to replay (default: 2017-01-01)",
-    )
     p.add_argument(
         "--speed",
         type=float,
@@ -212,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Log messages without actually sending to Kafka",
+        help="Log messages without sending to Kafka",
     )
     return p.parse_args()
 
@@ -220,9 +183,8 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     log.info(
-        "Starting historical playback: start=%s  speed=%.1fs  dry_run=%s",
-        args.start_date,
+        "Starting historical playback: speed=%.1fs  dry_run=%s",
         args.speed,
         args.dry_run,
     )
-    replay(start=args.start_date, speed=args.speed, dry_run=args.dry_run)
+    replay(speed=args.speed, dry_run=args.dry_run)
