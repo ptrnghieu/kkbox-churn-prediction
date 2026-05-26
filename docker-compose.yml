@@ -1,60 +1,63 @@
 version: "3.8"
-
 services:
-  # s3:
-  #   image: minio/minio
-  #   container_name: mlflow_minio
-  #   ports:
-  #     - "9000:9000" # API port
-  #     - "9001:9001" # Console UI port
-  #   environment:
-  #     - MINIO_ROOT_USER=admin
-  #     - MINIO_ROOT_PASSWORD=password
-  #   command: server /data --console-address ":9001"
-  #  store raw ingestion data
-  #  mlflow uses by "--default-artifact-root s3://mlflow-bucket/" in mlflow service's command
 
-  # postgres:
-  #   image: postgres:13
-  #   environment:
-  #     POSTGRES_DB: mlflow
-  #     POSTGRES_USER: mlflow
-  #     POSTGRES_PASSWORD: mlflow
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   use by  "--backend-store-uri ${DB_URI}" in mlflow service's command
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    networks:
+      - churn-network
 
   redis:
     image: redis:7.2-alpine
     ports: ["6379:6379"]
+    networks:
+      - churn-network
 
   feast:
     build: ./feature_store
     depends_on: [redis, kafka]
     env_file: ./.env
-    volumes: ["./feature_store/feature_store.yaml:/app/feature_store.yaml"]
+    volumes:
+      - ./feature_store/feature_store.yaml:/app/feature_store.yaml
+      - ~/.config/gcloud/application_default_credentials.json:/tmp/gcp_credentials.json
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp_credentials.json
+      GOOGLE_CLOUD_PROJECT: kkbox-churn-prediction-493716
+    networks:
+      - churn-network
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     container_name: mlflow_server
-    # depends_on:
-    #   - postgres
-    #   - s3
     ports:
       - "5000:5000"
-    # environment:
-    #   - DB_URI=postgresql://mlflow:mlflow@db:5432/mlflow
+    environment:
+      - MLFLOW_ALLOW_UNTRUSTED_HOST=true
     volumes:
       - ./artifacts:/mlflow/artifacts
       - ./mlflow.db:/mlflow/mlflow.db
     networks:
       - churn-network
     command: >
-      mlflow server 
+      mlflow server
       --backend-store-uri sqlite:///mlflow/mlflow.db
       --default-artifact-root /mlflow/artifacts
-      --host 0.0.0.0 
+      --host 0.0.0.0
       --port 5000
+
   api_serving:
     build: ./serving_pipeline
     depends_on: [feast, mlflow]
@@ -66,6 +69,7 @@ services:
       - ./feature_store:/app/feature_store
     networks:
       - churn-network
+
 networks:
   churn-network:
     driver: bridge

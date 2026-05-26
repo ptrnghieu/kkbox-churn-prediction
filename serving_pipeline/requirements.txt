@@ -2,6 +2,10 @@ fastapi
 uvicorn
 pydantic
 scikit-learn
+xgboost
+numpy
+pandas
 feast[gcp,redis]
+google-cloud-storage
 python-dotenv
 prometheus_client
