@@ -250,25 +250,30 @@ def train(
             registered_model_name=REGISTERED_MODEL_NAME,
         )
 
-        # Also save to a fixed GCS path so the serving API can load without
-        # needing MLflow registry (which lives only in local mlruns on Colab).
-        gcs_model_dir = f"gs://{GCS_BUCKET}/models/kkbox-churn-xgboost"
-        model.save_model(f"{gcs_model_dir}/model.ubj")
-
+        # Save to a fixed GCS path so the serving API can load without
+        # depending on MLflow registry (ephemeral on Colab).
+        # XGBoost doesn't support GCS paths directly — save locally then upload.
         import json as _json
+        import tempfile
         from google.cloud import storage as _gcs
+
         _client = _gcs.Client(project=PROJECT_ID)
         _bucket = _client.bucket(GCS_BUCKET)
+        _prefix = "models/kkbox-churn-xgboost"
 
-        _bucket.blob("models/kkbox-churn-xgboost/preprocessing_config.json").upload_from_string(
+        with tempfile.NamedTemporaryFile(suffix=".ubj", delete=False) as tmp:
+            model.save_model(tmp.name)
+            _bucket.blob(f"{_prefix}/model.ubj").upload_from_filename(tmp.name)
+
+        _bucket.blob(f"{_prefix}/preprocessing_config.json").upload_from_string(
             _json.dumps(preprocessing_config)
         )
-        _bucket.blob("models/kkbox-churn-xgboost/feature_cols.json").upload_from_string(
+        _bucket.blob(f"{_prefix}/feature_cols.json").upload_from_string(
             _json.dumps({"feature_cols": FEATURE_COLS})
         )
-        _bucket.blob("models/kkbox-churn-xgboost/run_id.txt").upload_from_string(run.info.run_id)
+        _bucket.blob(f"{_prefix}/run_id.txt").upload_from_string(run.info.run_id)
 
-        log.info("Model artifacts saved to: %s", gcs_model_dir)
+        log.info("Model artifacts saved to: gs://%s/%s", GCS_BUCKET, _prefix)
         log.info("MLflow run ID: %s", run.info.run_id)
 
 
