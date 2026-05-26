@@ -45,7 +45,7 @@ REGISTERED_MODEL_NAME = os.getenv("MODEL_NAME", "kkbox-churn-model")
 
 SPLIT_DATE = pd.Timestamp("2016-06-01")
 
-DROP_COLS = ["msno", "registration_init_time", "latest_expire_date"]
+DROP_COLS = ["msno", "registration_init_time", "latest_expire_date", "event_timestamp"]
 
 NUM_COLS = [
     "total_transactions",
