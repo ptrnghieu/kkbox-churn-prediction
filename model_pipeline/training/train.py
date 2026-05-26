@@ -35,11 +35,18 @@ log = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 
 PROJECT_ID = os.getenv("GCP_PROJECT_ID", "kkbox-churn-prediction-493716")
+GCS_BUCKET = os.getenv("GCS_BUCKET", "kkbox-churn-prediction-493716-data")
 BQ_TABLE = os.getenv(
     "BQ_FEATURES_TABLE",
     "kkbox-churn-prediction-493716.kkbox_gold.features_train",
 )
+# Backend store: local sqlite (throwaway on Colab, real server when deployed)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "mlruns")
+# Artifact store: GCS — persistent across Colab sessions and readable by serving API
+MLFLOW_ARTIFACT_ROOT = os.getenv(
+    "MLFLOW_ARTIFACT_ROOT",
+    f"gs://{GCS_BUCKET}/mlflow/artifacts",
+)
 MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT_NAME", "kkbox-churn-xgboost")
 REGISTERED_MODEL_NAME = os.getenv("MODEL_NAME", "kkbox-churn-model")
 
@@ -178,6 +185,11 @@ def train(
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
+
+    # Create experiment with GCS artifact location if it doesn't exist yet
+    experiment = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT)
+    if experiment is None:
+        mlflow.create_experiment(MLFLOW_EXPERIMENT, artifact_location=MLFLOW_ARTIFACT_ROOT)
 
     with mlflow.start_run(run_name="xgboost_baseline") as run:
         model = xgb.XGBClassifier(**params, scale_pos_weight=scale_pos_weight)
