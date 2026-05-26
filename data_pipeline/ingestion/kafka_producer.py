@@ -49,6 +49,10 @@ TRANSACTIONS_V2 = f"{BRONZE_PREFIX}/transactions_v2.csv"
 # Date column values in Bronze are INTEGER yyyyMMdd
 DATE_FORMAT = "%Y%m%d"
 
+# Stream from 2017-03-01: first date where both user_logs AND transactions
+# are available. Jan-Feb 2017 has transactions only (user_logs_v2 starts March).
+STREAM_START_DATE = date(2017, 3, 1)
+
 
 # ── Serialization ─────────────────────────────────────────────────────────────
 
@@ -114,6 +118,15 @@ def replay(speed: float, dry_run: bool) -> None:
     transactions["transaction_date"] = pd.to_datetime(
         transactions["transaction_date"].astype(str), format=DATE_FORMAT
     ).dt.date
+
+    # Filter to post-training data only (transactions_v2 contains pre-2017 history too)
+    transactions = transactions[transactions["transaction_date"] >= STREAM_START_DATE]
+    user_logs = user_logs[user_logs["date"] >= STREAM_START_DATE]
+    log.info(
+        "After filter (>= %s): user_logs=%d rows, transactions=%d rows",
+        STREAM_START_DATE, len(user_logs), len(transactions),
+    )
+
 
     # Build per-date groups
     logs_by_date = dict(tuple(user_logs.groupby("date")))
