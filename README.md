@@ -57,10 +57,26 @@ make test
   venv\Scripts\activate or source venv/bin/activate
   feast -c ../feature_store apply
 
+- Check entities and features:
+  feast -c ../feature_store entities list
+  feast -c ../feature_store feature-views list
+
+- Materialize features to online store:
+  feast -c ../feature_store materialize 2026-01-1 2026-05-25
+
 ## API serving
 
 - How to start:
   cd serving_pipeline
+  venv\Scripts\activate or source venv/bin/activate
   uvicorn app.main:app --reload
+
+  grafana: http://localhost:3000 (admin:admin)
+
+# Mornitoring
+
+- How to start:
+  cd monitoring_pipeline
+  docker-compose up -d
 
 ## Docs

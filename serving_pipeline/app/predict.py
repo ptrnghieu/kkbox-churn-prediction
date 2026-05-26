@@ -39,3 +39,5 @@ def batch_predict_churn(
             is_churn=result["is_churn"],
         )
     return [PredictResponse(**res) for res in results]
+
+

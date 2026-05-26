@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 from time import perf_counter
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.metrics import (
@@ -48,6 +48,9 @@ async def prometheus_http_middleware(request: Request, call_next):
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/test_error", tags=["Testing"])
+def test_error():
+    raise HTTPException(status_code=500, detail="This is a test error")
 
 @app.get("/metrics", tags=["Monitoring"], include_in_schema=False)
 def metrics():

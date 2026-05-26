@@ -14,7 +14,7 @@ online_store:
   type: redis
 
   # local
-  # connection_string: "localhost:6379"
+  connection_string: "localhost:6379"
 
   # docker
-  connection_string: "redis:6379"
+  # connection_string: "redis:6379"

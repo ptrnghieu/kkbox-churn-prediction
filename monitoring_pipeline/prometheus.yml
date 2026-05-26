@@ -5,4 +5,5 @@ scrape_configs:
   - job_name: "predictions"
     metrics_path: /metrics
     static_configs:
+      # host.docker.internal is used to access the host machine from within the Docker container
       - targets: ["host.docker.internal:8000"]
