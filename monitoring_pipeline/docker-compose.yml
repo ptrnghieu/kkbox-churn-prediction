@@ -2,27 +2,57 @@ version: "3.8"
 
 services:
   prometheus:
-    image: prom/prometheus
+    image: prom/prometheus:v2.51.0
     container_name: prometheus
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     ports:
       - "9090:9090"
+    restart: unless-stopped
     networks:
-      - monitoring_net
+      - churn-network
 
   grafana:
-    image: grafana/grafana
+    image: grafana/grafana:10.4.0
+    container_name: grafana
     ports:
       - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
     networks:
-      - monitoring_net
+      - churn-network
+
+  streamlit:
+    build:
+      context: ..
+      dockerfile: monitoring_pipeline/Dockerfile.streamlit
+    container_name: streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - FASTAPI_URL=http://api_serving:8000
+    restart: unless-stopped
+    networks:
+      - churn-network
 
 volumes:
+  prometheus_data:
   grafana_data:
 
 networks:
-  monitoring_net:
-    driver: bridge
+  churn-network:
+    external: true
