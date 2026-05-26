@@ -8,8 +8,8 @@ import os
 
 load_dotenv()
 
-GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
-BQ_DATASET = os.getenv("BQ_DATASET")
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "kkbox-churn-prediction-493716")
+BQ_DATASET = os.getenv("BQ_DATASET", "kkbox_gold")
 TABLE_NAME = os.getenv("TABLE_NAME", "features_train")
 
 feature_source = BigQuerySource(
