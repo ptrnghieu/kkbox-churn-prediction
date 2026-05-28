@@ -201,7 +201,8 @@ def materialize(date_str: str, dry_run: bool) -> None:
 
 def consume(bootstrap_servers: str, dry_run: bool) -> None:
     bq = bigquery.Client(project=GCP_PROJECT_ID)
-    ensure_table(bq)
+    if not dry_run:
+        ensure_table(bq)
     members = load_members(bq)
 
     consumer = KafkaConsumer(
