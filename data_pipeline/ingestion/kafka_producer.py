@@ -84,17 +84,15 @@ def _make_producer() -> KafkaProducer:
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         value_serializer=_serialize,
         key_serializer=lambda k: k.encode("utf-8") if k else None,
-        acks="all",
+        acks=1,
         retries=3,
+        linger_ms=50,
+        batch_size=65536,
     )
 
 
 def _send(producer: KafkaProducer, topic: str, key: str, record: dict) -> None:
-    future = producer.send(topic, key=key, value=record)
-    try:
-        future.get(timeout=10)
-    except KafkaError:
-        log.exception("Failed to send to %s key=%s", topic, key)
+    producer.send(topic, key=key, value=record)
 
 
 # ── Replay logic ──────────────────────────────────────────────────────────────
@@ -163,6 +161,8 @@ def replay(speed: float, dry_run: bool) -> None:
             total_txn += len(records)
             log.info("  transactions: %d", len(records))
 
+        if producer:
+            producer.flush()
         if speed > 0:
             time.sleep(speed)
 
