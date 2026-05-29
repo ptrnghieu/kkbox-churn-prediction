@@ -13,7 +13,7 @@
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
       "targets": [
         {
-          "expr": "sum(rate(serving_prediction_results_total{is_churn=\"True\"}[5m])) / sum(rate(serving_prediction_results_total[5m]))",
+          "expr": "sum(rate(serving_prediction_results_total{is_churn=\"1\"}[5m])) / sum(rate(serving_prediction_results_total[5m]))",
           "legendFormat": "churn rate",
           "refId": "A"
         }
@@ -90,7 +90,7 @@
       "gridPos": { "x": 6, "y": 16, "w": 6, "h": 4 },
       "targets": [
         {
-          "expr": "sum(serving_prediction_results_total{is_churn=\"True\"})",
+          "expr": "sum(serving_prediction_results_total{is_churn=\"1\"})",
           "refId": "A"
         }
       ],
