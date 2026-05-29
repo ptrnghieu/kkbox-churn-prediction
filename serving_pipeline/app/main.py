@@ -54,9 +54,9 @@ def health_check():
 @app.get("/sample", tags=["Utility"])
 def sample_msnos(n: int = 5):
     """Return n random msno values that exist in the online feature store."""
+    import re
     try:
         r = redis_lib.Redis(host="10.80.68.19", port=6379, socket_timeout=3)
-        # RANDOMKEY is O(1) — call it n times
         msnos = set()
         attempts = 0
         while len(msnos) < n and attempts < n * 10:
@@ -64,16 +64,10 @@ def sample_msnos(n: int = 5):
             attempts += 1
             if raw is None:
                 break
-            s = raw.decode("latin-1")
-            if "msno" in s and "kkbox_churn" in s:
-                try:
-                    start = s.index("msno") + 9  # 4 (tag) + 5 (length prefix bytes)
-                    end = s.index("kkbox_churn")
-                    msno = s[start:end]
-                    if len(msno) > 10:
-                        msnos.add(msno)
-                except ValueError:
-                    pass
+            # Extract base64-encoded msno (44 chars ending with =)
+            matches = re.findall(r'[A-Za-z0-9+/]{43}=', raw.decode("latin-1", errors="ignore"))
+            if matches:
+                msnos.add(matches[0])
         return {"msnos": list(msnos)}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Cannot reach feature store: {exc}")
