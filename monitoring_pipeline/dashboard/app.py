@@ -23,49 +23,87 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
+/* ── Music note background pattern ── */
+.stApp {
+    background-color: #f8f7f5;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Ctext x='10' y='50' font-size='28' fill='rgba(207,111,60,0.07)' font-family='serif'%3E%E2%99%AA%3C/text%3E%3Ctext x='65' y='95' font-size='20' fill='rgba(207,111,60,0.05)' font-family='serif'%3E%E2%99%AB%3C/text%3E%3Ctext x='80' y='30' font-size='14' fill='rgba(207,111,60,0.04)' font-family='serif'%3E%E2%99%A9%3C/text%3E%3C/svg%3E");
+}
+
 .block-container {
     padding: 2.5rem 3rem 3rem 3rem;
     max-width: 1100px;
 }
 
-/* Header */
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #1c0f2e 0%, #110a1f 100%) !important;
+    border-right: 1px solid rgba(255,255,255,0.06);
+}
+section[data-testid="stSidebar"] .stMarkdown,
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] h3 {
+    color: #e2d9f3 !important;
+}
+section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
+    background: rgba(255,255,255,0.08) !important;
+    border: 1px solid rgba(255,255,255,0.15) !important;
+    color: #f0ebfa !important;
+    border-radius: 8px;
+}
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.1) !important;
+}
+/* Sidebar status text override */
+section[data-testid="stSidebar"] .stAlert p {
+    color: inherit !important;
+}
+
+/* ── Header ── */
 .app-header {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin-bottom: 0.25rem;
+    gap: 16px;
+    margin-bottom: 0.2rem;
 }
 .app-header h1 {
-    font-size: 1.6rem;
-    font-weight: 600;
+    font-size: 1.65rem;
+    font-weight: 700;
     color: #1a1a1a;
     margin: 0;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.4px;
+}
+.waveform {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 36px;
+}
+.waveform span {
+    display: inline-block;
+    width: 4px;
+    border-radius: 2px;
+    background: #CF6F3C;
+    opacity: 0.85;
 }
 .app-subtitle {
     color: #6b7280;
     font-size: 0.9rem;
     margin-bottom: 2rem;
+    margin-left: 2px;
 }
 
-/* Cards */
-.card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 14px;
-    padding: 1.75rem;
-    margin-bottom: 1.25rem;
-}
+/* ── Cards ── */
 .card-title {
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: 0.75rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     color: #9ca3af;
     margin-bottom: 1rem;
 }
 
-/* Result badge */
+/* ── Badges ── */
 .badge-churn {
     display: inline-flex;
     align-items: center;
@@ -74,7 +112,7 @@ html, body, [class*="css"] {
     color: #dc2626;
     border: 1px solid #fecaca;
     border-radius: 999px;
-    padding: 5px 14px;
+    padding: 5px 16px;
     font-size: 0.85rem;
     font-weight: 600;
 }
@@ -86,46 +124,51 @@ html, body, [class*="css"] {
     color: #16a34a;
     border: 1px solid #bbf7d0;
     border-radius: 999px;
-    padding: 5px 14px;
+    padding: 5px 16px;
     font-size: 0.85rem;
     font-weight: 600;
 }
 
-/* Stat box */
+/* ── Stat boxes ── */
 .stat-box {
-    background: #f9fafb;
+    background: #ffffff;
     border: 1px solid #e5e7eb;
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 1rem 1.25rem;
     text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 .stat-value {
-    font-size: 1.8rem;
+    font-size: 1.9rem;
     font-weight: 700;
     color: #111827;
     line-height: 1.2;
 }
 .stat-label {
-    font-size: 0.78rem;
-    color: #6b7280;
-    margin-top: 2px;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 3px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
 }
 .stat-value.danger { color: #dc2626; }
 .stat-value.success { color: #16a34a; }
 
-/* Input styling */
+/* ── Inputs ── */
 div[data-testid="stTextInput"] input {
     border-radius: 8px;
     border: 1px solid #d1d5db;
     font-size: 0.9rem;
     padding: 0.6rem 0.75rem;
+    background: #ffffff;
 }
 div[data-testid="stTextInput"] input:focus {
     border-color: #CF6F3C;
     box-shadow: 0 0 0 3px rgba(207,111,60,0.15);
 }
 
-/* Button */
+/* ── Buttons ── */
 div[data-testid="stFormSubmitButton"] button,
 button[kind="primary"] {
     background: #CF6F3C !important;
@@ -137,30 +180,25 @@ button[kind="primary"] {
     color: white !important;
     transition: background 0.2s ease !important;
 }
-div[data-testid="stFormSubmitButton"] button:hover {
+div[data-testid="stFormSubmitButton"] button:hover,
+button[kind="primary"]:hover {
     background: #b85e2f !important;
 }
 
-/* Tabs */
+/* ── Tabs ── */
 div[data-testid="stTabs"] button {
     font-size: 0.9rem;
     font-weight: 500;
     color: #6b7280;
-    border-radius: 8px 8px 0 0;
 }
 div[data-testid="stTabs"] button[aria-selected="true"] {
     color: #CF6F3C;
     border-bottom-color: #CF6F3C !important;
 }
 
-/* Divider */
+/* ── Misc ── */
 hr { border-color: #f3f4f6; }
-
-/* Hide form border */
 div[data-testid="stForm"] { border: none !important; padding: 0 !important; background: transparent !important; }
-
-/* Sidebar */
-section[data-testid="stSidebar"] { background: #f9fafb; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -175,19 +213,42 @@ def api_healthy(url: str) -> bool:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("### Settings")
-    api_url = st.text_input("API URL", value=FASTAPI_URL, label_visibility="visible")
+    st.markdown("""
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-top:0.5rem;">
+        <span style="font-size:1.5rem">🎵</span>
+        <span style="font-size:1rem;font-weight:600;color:#e2d9f3;letter-spacing:-0.2px;">KKBox</span>
+    </div>
+    """, unsafe_allow_html=True)
+    api_url = st.text_input("API URL", value=FASTAPI_URL)
     st.divider()
-    if api_healthy(api_url):
-        st.success("● API is online", icon=None)
+    healthy = api_healthy(api_url)
+    if healthy:
+        st.success("API is online")
     else:
-        st.error("● API is offline")
+        st.error("API is offline")
+    st.markdown("""
+    <div style="position:absolute;bottom:2rem;left:1.5rem;right:1.5rem;">
+        <p style="font-size:0.72rem;color:rgba(255,255,255,0.3);margin:0;">KKBox Churn · v1.0</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <div class="app-header">
-    <span style="font-size:2rem">🎵</span>
+    <div class="waveform" aria-hidden="true">
+        <span style="height:10px"></span>
+        <span style="height:22px"></span>
+        <span style="height:32px"></span>
+        <span style="height:18px"></span>
+        <span style="height:28px"></span>
+        <span style="height:14px"></span>
+        <span style="height:36px"></span>
+        <span style="height:24px"></span>
+        <span style="height:16px"></span>
+        <span style="height:30px"></span>
+        <span style="height:10px"></span>
+    </div>
     <h1>KKBox Churn Prediction</h1>
 </div>
 <p class="app-subtitle">Predict subscriber churn probability using real-time feature lookup from the online feature store.</p>
@@ -203,7 +264,6 @@ with tab1:
     with left:
         st.markdown('<p class="card-title">Member Lookup</p>', unsafe_allow_html=True)
 
-        # Random sample button (outside form so it triggers immediately)
         if st.button("🎲 Random sample", key="random_btn"):
             try:
                 r = requests.get(f"{api_url}/sample?n=1", timeout=5)
@@ -223,8 +283,9 @@ with tab1:
             predict_btn = st.form_submit_button("Predict churn risk", use_container_width=True, type="primary")
 
         st.markdown("""
-        <p style="font-size:0.78rem; color:#9ca3af; margin-top:0.75rem;">
-        Enter the hashed member ID (msno) to look up features from the online store and get a real-time churn prediction.
+        <p style="font-size:0.78rem;color:#9ca3af;margin-top:0.75rem;line-height:1.5;">
+        Enter the hashed member ID (msno) to look up features from the online store
+        and get a real-time churn prediction.
         </p>
         """, unsafe_allow_html=True)
 
@@ -248,18 +309,19 @@ with tab1:
 
                     st.markdown('<p class="card-title">Prediction Result</p>', unsafe_allow_html=True)
 
+                    color = "#dc2626" if is_churn else "#16a34a"
                     fig = go.Figure(go.Indicator(
                         mode="gauge+number",
                         value=round(prob * 100, 1),
-                        number={"suffix": "%", "font": {"size": 40, "color": "#dc2626" if is_churn else "#16a34a"}},
+                        number={"suffix": "%", "font": {"size": 42, "color": color}},
                         gauge={
                             "axis": {"range": [0, 100], "ticksuffix": "%", "tickfont": {"size": 11}, "tickcolor": "#9ca3af"},
-                            "bar": {"color": "#dc2626" if is_churn else "#16a34a", "thickness": 0.25},
-                            "bgcolor": "#f9fafb",
+                            "bar": {"color": color, "thickness": 0.26},
+                            "bgcolor": "#f4f3f1",
                             "borderwidth": 0,
                             "steps": [
-                                {"range": [0, 78.1], "color": "#f0fdf4"},
-                                {"range": [78.1, 100], "color": "#fef2f2"},
+                                {"range": [0, 78.1], "color": "#ecfdf5"},
+                                {"range": [78.1, 100], "color": "#fff1f2"},
                             ],
                             "threshold": {
                                 "line": {"color": "#6b7280", "width": 2},
@@ -283,8 +345,8 @@ with tab1:
                     )
                     st.markdown(badge, unsafe_allow_html=True)
                     st.markdown(f"""
-                    <p style="font-size:0.82rem; color:#6b7280; margin-top:0.5rem;">
-                    Threshold: 78.1% &nbsp;·&nbsp; Score: <b>{prob:.1%}</b>
+                    <p style="font-size:0.82rem;color:#6b7280;margin-top:0.5rem;">
+                    Threshold: 78.1%&nbsp;·&nbsp;Score: <b>{prob:.1%}</b>
                     </p>
                     """, unsafe_allow_html=True)
 
@@ -297,11 +359,19 @@ with tab1:
             st.warning("Please enter a member ID.")
         else:
             st.markdown("""
-            <div style="height:220px; display:flex; flex-direction:column;
-                        align-items:center; justify-content:center;
-                        background:#f9fafb; border-radius:12px; border:1px dashed #d1d5db;">
-                <span style="font-size:2rem; opacity:0.3">📊</span>
-                <p style="color:#9ca3af; font-size:0.85rem; margin-top:0.5rem;">
+            <div style="height:220px;display:flex;flex-direction:column;
+                        align-items:center;justify-content:center;
+                        background:#ffffff;border-radius:14px;border:1px dashed #d1d5db;">
+                <svg width="40" height="32" viewBox="0 0 40 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:0.2">
+                    <rect x="0"  y="10" width="4" height="12" rx="2" fill="#CF6F3C"/>
+                    <rect x="6"  y="4"  width="4" height="24" rx="2" fill="#CF6F3C"/>
+                    <rect x="12" y="0"  width="4" height="32" rx="2" fill="#CF6F3C"/>
+                    <rect x="18" y="6"  width="4" height="20" rx="2" fill="#CF6F3C"/>
+                    <rect x="24" y="2"  width="4" height="28" rx="2" fill="#CF6F3C"/>
+                    <rect x="30" y="8"  width="4" height="16" rx="2" fill="#CF6F3C"/>
+                    <rect x="36" y="12" width="4" height="8"  rx="2" fill="#CF6F3C"/>
+                </svg>
+                <p style="color:#9ca3af;font-size:0.85rem;margin-top:1rem;">
                     Result will appear here
                 </p>
             </div>
@@ -311,7 +381,12 @@ with tab1:
 
 with tab2:
     st.markdown('<p class="card-title">Batch Prediction</p>', unsafe_allow_html=True)
-    st.markdown('<p style="font-size:0.85rem; color:#6b7280; margin-bottom:1rem;">Upload a CSV file with a column named <code>msno</code>. Results include churn probability and risk label for each user.</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">'
+        'Upload a CSV with a column named <code>msno</code>. '
+        'Results include churn probability and risk label for each member.</p>',
+        unsafe_allow_html=True,
+    )
 
     uploaded = st.file_uploader("", type=["csv"], label_visibility="collapsed")
 
@@ -332,7 +407,7 @@ with tab2:
                             timeout=120,
                         )
                         resp.raise_for_status()
-                        results = resp.json()["predictions"]
+                        results = resp.json()  # API returns list directly
                         result_df = pd.DataFrame(results)
 
                         churn_n    = int(result_df["is_churn"].sum())
@@ -348,7 +423,8 @@ with tab2:
                         with c3:
                             st.markdown(f'<div class="stat-box"><div class="stat-value success">{retain_n}</div><div class="stat-label">Predicted Retain</div></div>', unsafe_allow_html=True)
                         with c4:
-                            st.markdown(f'<div class="stat-box"><div class="stat-value {"danger" if churn_rate > 0.3 else "success"}">{churn_rate:.1%}</div><div class="stat-label">Churn Rate</div></div>', unsafe_allow_html=True)
+                            cls = "danger" if churn_rate > 0.3 else "success"
+                            st.markdown(f'<div class="stat-box"><div class="stat-value {cls}">{churn_rate:.1%}</div><div class="stat-label">Churn Rate</div></div>', unsafe_allow_html=True)
 
                         st.markdown("<br>", unsafe_allow_html=True)
                         col_chart, col_table = st.columns([1.1, 1], gap="large")
@@ -361,7 +437,6 @@ with tab2:
                                 marker_color="#93c5fd",
                                 marker_line_color="white",
                                 marker_line_width=1,
-                                name="Distribution",
                             ))
                             fig.add_vline(
                                 x=0.781, line_dash="dot", line_color="#CF6F3C", line_width=2,
@@ -373,7 +448,7 @@ with tab2:
                                 xaxis=dict(title="Churn Probability", tickformat=".0%", range=[0, 1]),
                                 yaxis=dict(title="Users"),
                                 paper_bgcolor="rgba(0,0,0,0)",
-                                plot_bgcolor="#f9fafb",
+                                plot_bgcolor="#fafaf9",
                                 font=dict(family="Inter", color="#374151", size=11),
                                 height=300,
                                 margin=dict(t=40, b=40, l=10, r=10),
@@ -382,7 +457,7 @@ with tab2:
                             st.plotly_chart(fig, use_container_width=True)
 
                         with col_table:
-                            st.markdown('<p style="font-size:0.82rem; font-weight:600; color:#374151; margin-bottom:0.5rem;">Top churn risks</p>', unsafe_allow_html=True)
+                            st.markdown('<p style="font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.5rem;">Top churn risks</p>', unsafe_allow_html=True)
                             top = (
                                 result_df[result_df["is_churn"] == 1]
                                 .sort_values("churn_probability", ascending=False)
