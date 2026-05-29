@@ -536,6 +536,39 @@ with tab3:
 
         if total > 0:
             st.markdown("<br>", unsafe_allow_html=True)
+
+            # ── Churn user list ──
+            try:
+                cr = requests.get(f"{api_url}/stats/churned?limit=500", timeout=5)
+                cr.raise_for_status()
+                churned = cr.json().get("churned", [])
+                if churned:
+                    st.markdown('<p class="card-title">All Predicted Churn Users</p>', unsafe_allow_html=True)
+                    churn_df = pd.DataFrame(churned)
+                    churn_df["Score"] = churn_df["churn_probability"].map(lambda x: f"{x:.1%}")
+                    churn_df = churn_df.rename(columns={"msno": "Member ID", "churn_probability": "Probability"})
+
+                    search = st.text_input("🔍 Filter by Member ID", placeholder="Type to filter...", key="churn_search")
+                    if search:
+                        churn_df = churn_df[churn_df["Member ID"].str.contains(search, case=False, na=False)]
+
+                    st.markdown(f'<p style="font-size:0.8rem;color:#9ca3af;margin-bottom:0.5rem;">{len(churn_df)} users predicted to churn</p>', unsafe_allow_html=True)
+                    st.dataframe(
+                        churn_df[["Member ID", "Score"]],
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(400, 40 + len(churn_df) * 35),
+                    )
+                    csv = pd.DataFrame(churned).to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "⬇ Download churn list (CSV)",
+                        csv, "churn_users.csv", "text/csv",
+                        use_container_width=False,
+                    )
+            except Exception:
+                pass
+
+            st.markdown("<br>", unsafe_allow_html=True)
             col_pie, col_info = st.columns([1, 1.4], gap="large")
 
             with col_pie:

@@ -58,6 +58,12 @@ def get_stats():
     return stats_store.get()
 
 
+@app.get("/stats/churned", tags=["Monitoring"])
+def get_churned(limit: int = 500):
+    """Return list of members predicted to churn, sorted by probability desc."""
+    return {"churned": stats_store.get_churned(limit=limit)}
+
+
 @app.get("/sample", tags=["Utility"])
 def sample_msnos(n: int = 5):
     """Return n random msno values that exist in the online feature store."""
