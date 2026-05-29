@@ -5,6 +5,7 @@ from app.metrics import (
     observe_prediction_result,
 )
 from app.schemas import BatchPredictRequest, PredictRequest, PredictResponse
+from app import stats_store
 from service.prediction import PredictionService
 
 router = APIRouter()
@@ -21,6 +22,7 @@ def predict_churn(data: PredictRequest, service: PredictionService = Depends(get
         churn_probability=result["churn_probability"],
         is_churn=result["is_churn"],
     )
+    stats_store.record(result["is_churn"])
     return PredictResponse(**result)
 
 @router.post("/batch", response_model=list[PredictResponse], tags=["Batch Prediction"])
@@ -37,6 +39,7 @@ def batch_predict_churn(
             churn_probability=result["churn_probability"],
             is_churn=result["is_churn"],
         )
+        stats_store.record(result["is_churn"])
     return [PredictResponse(**res) for res in results]
 
 
