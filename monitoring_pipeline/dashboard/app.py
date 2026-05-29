@@ -23,7 +23,7 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
-/* ── Music note background pattern ── */
+/* ── Music note background ── */
 .stApp {
     background-color: #f8f7f5;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Ctext x='10' y='50' font-size='28' fill='rgba(207,111,60,0.07)' font-family='serif'%3E%E2%99%AA%3C/text%3E%3Ctext x='65' y='95' font-size='20' fill='rgba(207,111,60,0.05)' font-family='serif'%3E%E2%99%AB%3C/text%3E%3Ctext x='80' y='30' font-size='14' fill='rgba(207,111,60,0.04)' font-family='serif'%3E%E2%99%A9%3C/text%3E%3C/svg%3E");
@@ -39,24 +39,50 @@ section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #1c0f2e 0%, #110a1f 100%) !important;
     border-right: 1px solid rgba(255,255,255,0.06);
 }
-section[data-testid="stSidebar"] .stMarkdown,
-section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] > div {
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+}
+/* All text in sidebar */
 section[data-testid="stSidebar"] p,
-section[data-testid="stSidebar"] h3 {
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] span,
+section[data-testid="stSidebar"] div {
     color: #e2d9f3 !important;
 }
-section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
-    background: rgba(255,255,255,0.08) !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
+section[data-testid="stSidebar"] h3 {
+    color: #ffffff !important;
+}
+/* Sidebar input */
+section[data-testid="stSidebar"] input {
+    background: rgba(255,255,255,0.1) !important;
+    border: 1px solid rgba(255,255,255,0.2) !important;
     color: #f0ebfa !important;
-    border-radius: 8px;
+    border-radius: 8px !important;
+    caret-color: #CF6F3C !important;
+}
+section[data-testid="stSidebar"] input::placeholder {
+    color: rgba(255,255,255,0.35) !important;
 }
 section[data-testid="stSidebar"] hr {
     border-color: rgba(255,255,255,0.1) !important;
 }
-/* Sidebar status text override */
-section[data-testid="stSidebar"] .stAlert p {
-    color: inherit !important;
+
+/* ── Main area inputs ── */
+div[data-testid="stTextInput"] input {
+    border-radius: 8px !important;
+    border: 1px solid #d1d5db !important;
+    font-size: 0.9rem !important;
+    padding: 0.6rem 0.75rem !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+}
+div[data-testid="stTextInput"] input:focus {
+    border-color: #CF6F3C !important;
+    box-shadow: 0 0 0 3px rgba(207,111,60,0.15) !important;
+}
+div[data-testid="stTextInput"] input::placeholder {
+    color: #9ca3af !important;
 }
 
 /* ── Header ── */
@@ -93,7 +119,7 @@ section[data-testid="stSidebar"] .stAlert p {
     margin-left: 2px;
 }
 
-/* ── Cards ── */
+/* ── Card title ── */
 .card-title {
     font-size: 0.75rem;
     font-weight: 700;
@@ -134,7 +160,7 @@ section[data-testid="stSidebar"] .stAlert p {
     background: #ffffff;
     border: 1px solid #e5e7eb;
     border-radius: 12px;
-    padding: 1rem 1.25rem;
+    padding: 1.1rem 1.25rem;
     text-align: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
@@ -145,28 +171,16 @@ section[data-testid="stSidebar"] .stAlert p {
     line-height: 1.2;
 }
 .stat-label {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: #9ca3af;
     margin-top: 3px;
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
 }
-.stat-value.danger { color: #dc2626; }
+.stat-value.danger  { color: #dc2626; }
 .stat-value.success { color: #16a34a; }
-
-/* ── Inputs ── */
-div[data-testid="stTextInput"] input {
-    border-radius: 8px;
-    border: 1px solid #d1d5db;
-    font-size: 0.9rem;
-    padding: 0.6rem 0.75rem;
-    background: #ffffff;
-}
-div[data-testid="stTextInput"] input:focus {
-    border-color: #CF6F3C;
-    box-shadow: 0 0 0 3px rgba(207,111,60,0.15);
-}
+.stat-value.neutral { color: #CF6F3C; }
 
 /* ── Buttons ── */
 div[data-testid="stFormSubmitButton"] button,
@@ -214,9 +228,9 @@ def api_healthy(url: str) -> bool:
 
 with st.sidebar:
     st.markdown("""
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;padding-top:0.5rem;">
-        <span style="font-size:1.5rem">🎵</span>
-        <span style="font-size:1rem;font-weight:600;color:#e2d9f3;letter-spacing:-0.2px;">KKBox</span>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;">
+        <span style="font-size:1.4rem">🎵</span>
+        <span style="font-size:0.95rem;font-weight:600;letter-spacing:-0.2px;">KKBox Churn</span>
     </div>
     """, unsafe_allow_html=True)
     api_url = st.text_input("API URL", value=FASTAPI_URL)
@@ -226,11 +240,11 @@ with st.sidebar:
         st.success("API is online")
     else:
         st.error("API is offline")
-    st.markdown("""
-    <div style="position:absolute;bottom:2rem;left:1.5rem;right:1.5rem;">
-        <p style="font-size:0.72rem;color:rgba(255,255,255,0.3);margin:0;">KKBox Churn · v1.0</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:0.72rem;color:rgba(255,255,255,0.25);margin:0;">v1.0 · KKBox Churn Prediction</p>',
+        unsafe_allow_html=True,
+    )
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
@@ -254,7 +268,7 @@ st.markdown("""
 <p class="app-subtitle">Predict subscriber churn probability using real-time feature lookup from the online feature store.</p>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Single User", "Batch Prediction"])
+tab1, tab2, tab3 = st.tabs(["Single User", "Batch Prediction", "Statistics"])
 
 # ── Tab 1: Single ─────────────────────────────────────────────────────────────
 
@@ -362,18 +376,16 @@ with tab1:
             <div style="height:220px;display:flex;flex-direction:column;
                         align-items:center;justify-content:center;
                         background:#ffffff;border-radius:14px;border:1px dashed #d1d5db;">
-                <svg width="40" height="32" viewBox="0 0 40 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:0.2">
-                    <rect x="0"  y="10" width="4" height="12" rx="2" fill="#CF6F3C"/>
-                    <rect x="6"  y="4"  width="4" height="24" rx="2" fill="#CF6F3C"/>
-                    <rect x="12" y="0"  width="4" height="32" rx="2" fill="#CF6F3C"/>
-                    <rect x="18" y="6"  width="4" height="20" rx="2" fill="#CF6F3C"/>
-                    <rect x="24" y="2"  width="4" height="28" rx="2" fill="#CF6F3C"/>
-                    <rect x="30" y="8"  width="4" height="16" rx="2" fill="#CF6F3C"/>
-                    <rect x="36" y="12" width="4" height="8"  rx="2" fill="#CF6F3C"/>
+                <svg width="48" height="36" viewBox="0 0 48 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="opacity:0.2">
+                    <rect x="0"  y="12" width="5" height="12" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="7"  y="6"  width="5" height="24" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="14" y="0"  width="5" height="36" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="21" y="8"  width="5" height="20" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="28" y="2"  width="5" height="32" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="35" y="9"  width="5" height="18" rx="2.5" fill="#CF6F3C"/>
+                    <rect x="42" y="14" width="5" height="8"  rx="2.5" fill="#CF6F3C"/>
                 </svg>
-                <p style="color:#9ca3af;font-size:0.85rem;margin-top:1rem;">
-                    Result will appear here
-                </p>
+                <p style="color:#9ca3af;font-size:0.85rem;margin-top:1rem;">Result will appear here</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -407,7 +419,7 @@ with tab2:
                             timeout=120,
                         )
                         resp.raise_for_status()
-                        results = resp.json()  # API returns list directly
+                        results = resp.json()
                         result_df = pd.DataFrame(results)
 
                         churn_n    = int(result_df["is_churn"].sum())
@@ -487,3 +499,96 @@ with tab2:
                         st.error("Cannot reach the API. Check the URL in the sidebar.")
                     except Exception as e:
                         st.error(f"Error: {e}")
+
+# ── Tab 3: Statistics ─────────────────────────────────────────────────────────
+
+with tab3:
+    st.markdown('<p class="card-title">Prediction Statistics</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:0.85rem;color:#6b7280;margin-bottom:1.5rem;">'
+        'Cumulative counts since the API last started. Click Refresh to update.</p>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("↻ Refresh", key="refresh_stats"):
+        st.session_state.pop("stats_cache", None)
+
+    try:
+        if "stats_cache" not in st.session_state:
+            r = requests.get(f"{api_url}/stats", timeout=5)
+            r.raise_for_status()
+            st.session_state["stats_cache"] = r.json()
+
+        s = st.session_state["stats_cache"]
+        total      = s["total_predictions"]
+        churn_n    = s["churn_count"]
+        retain_n   = s["retain_count"]
+        churn_rate = s["churn_rate"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown(f'<div class="stat-box"><div class="stat-value">{total:,}</div><div class="stat-label">Total Predictions</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="stat-box"><div class="stat-value danger">{churn_n:,}</div><div class="stat-label">Churn</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="stat-box"><div class="stat-value success">{retain_n:,}</div><div class="stat-label">Retain</div></div>', unsafe_allow_html=True)
+        with c4:
+            cls = "danger" if churn_rate > 0.3 else "success"
+            st.markdown(f'<div class="stat-box"><div class="stat-value {cls}">{churn_rate:.1%}</div><div class="stat-label">Churn Rate</div></div>', unsafe_allow_html=True)
+
+        if total > 0:
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_pie, col_info = st.columns([1, 1.4], gap="large")
+
+            with col_pie:
+                fig = go.Figure(go.Pie(
+                    labels=["Churn", "Retain"],
+                    values=[churn_n, retain_n],
+                    marker_colors=["#fca5a5", "#86efac"],
+                    hole=0.6,
+                    textinfo="percent",
+                    textfont=dict(size=13, family="Inter"),
+                    hovertemplate="%{label}: %{value:,}<extra></extra>",
+                ))
+                fig.add_annotation(
+                    text=f"<b>{churn_rate:.1%}</b><br><span style='font-size:11px'>churn rate</span>",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=16, family="Inter", color="#374151"),
+                )
+                fig.update_layout(
+                    height=280,
+                    margin=dict(t=20, b=20, l=0, r=0),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    showlegend=True,
+                    legend=dict(font=dict(family="Inter", size=12), orientation="h", y=-0.08),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col_info:
+                st.markdown("<br>", unsafe_allow_html=True)
+                rows = [
+                    ("Total predictions made", f"{total:,}"),
+                    ("Predicted to churn", f"{churn_n:,} ({churn_rate:.1%})"),
+                    ("Predicted to retain", f"{retain_n:,} ({1-churn_rate:.1%})"),
+                    ("Decision threshold", "78.1%"),
+                    ("Model", "XGBoost · AUC-ROC 0.8926"),
+                ]
+                table_html = '<table style="width:100%;border-collapse:collapse;font-size:0.875rem;">'
+                for label, value in rows:
+                    table_html += f"""
+                    <tr style="border-bottom:1px solid #f3f4f6;">
+                        <td style="padding:0.65rem 0.5rem;color:#6b7280;font-weight:500;">{label}</td>
+                        <td style="padding:0.65rem 0.5rem;color:#111827;font-weight:600;text-align:right;">{value}</td>
+                    </tr>"""
+                table_html += "</table>"
+                st.markdown(
+                    f'<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:0.5rem 1rem;">{table_html}</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.info("No predictions made yet. Run some predictions first.")
+
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot reach the API. Check the URL in the sidebar.")
+    except Exception as e:
+        st.error(f"Error loading stats: {e}")

@@ -4,7 +4,7 @@ from time import perf_counter
 
 import redis as redis_lib
 from fastapi import FastAPI, HTTPException, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
 from app.metrics import (
     HTTP_REQUEST_DURATION_SECONDS,
@@ -49,6 +49,31 @@ async def prometheus_http_middleware(request: Request, call_next):
 @app.get("/health", tags=["Health Check"])
 def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/stats", tags=["Monitoring"])
+def get_stats():
+    """Return cumulative prediction statistics from in-memory Prometheus counters."""
+    def _counter(metric_name: str, **labels) -> float:
+        for metric in REGISTRY.collect():
+            if metric.name == metric_name:
+                for sample in metric.samples:
+                    if sample.name == metric_name + "_total" or sample.name == metric_name:
+                        if all(sample.labels.get(k) == v for k, v in labels.items()):
+                            return sample.value
+        return 0.0
+
+    total      = _counter("serving_prediction_requests_total", kind="single") + \
+                 _counter("serving_prediction_requests_total", kind="batch")
+    churn      = _counter("serving_prediction_results_total", is_churn="1")
+    retain     = _counter("serving_prediction_results_total", is_churn="0")
+    churn_rate = (churn / total) if total > 0 else 0.0
+    return {
+        "total_predictions": int(total),
+        "churn_count":       int(churn),
+        "retain_count":      int(retain),
+        "churn_rate":        round(churn_rate, 4),
+    }
 
 
 @app.get("/sample", tags=["Utility"])
