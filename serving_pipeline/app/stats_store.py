@@ -10,8 +10,11 @@ _stats = {"total": 0, "churn": 0, "retain": 0}
 _churn_history: deque[dict] = deque(maxlen=_MAX_HISTORY)
 
 
-def record(msno: str, churn_probability: float, is_churn: int) -> None:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+def record(msno: str, churn_probability: float, is_churn: int, event_time: str | None = None) -> None:
+    if event_time:
+        timestamp = event_time  # e.g. "2017-03-15" from Kafka streaming
+    else:
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     with _lock:
         _stats["total"] += 1
         if is_churn:
@@ -19,7 +22,7 @@ def record(msno: str, churn_probability: float, is_churn: int) -> None:
             _churn_history.append({
                 "msno": msno,
                 "churn_probability": churn_probability,
-                "predicted_at": now,
+                "predicted_at": timestamp,
             })
         else:
             _stats["retain"] += 1

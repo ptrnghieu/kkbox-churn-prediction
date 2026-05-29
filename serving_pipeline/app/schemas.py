@@ -1,13 +1,17 @@
 """Pydantic schemas for request/response."""
+from typing import Optional
+
 from pydantic import BaseModel
 
 
 class PredictRequest(BaseModel):
     msno: str
+    event_time: Optional[str] = None  # "2017-03-15" from Kafka; None = use server time
 
 
 class BatchPredictRequest(BaseModel):
     msno_list: list[str]
+    event_time: Optional[str] = None  # single event_time applied to all items in batch
 
 
 class PredictResponse(BaseModel):
