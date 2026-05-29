@@ -113,11 +113,14 @@ class PredictionService:
 
     def predict_single(self, msno: str) -> dict:
         features = self._get_features(msno)
+        feature_values = {k: v for k, v in features.items() if k != "msno"}
+        member_found = bool(feature_values) and any(v is not None for v in feature_values.values())
         churn_prob = self._predict(features)
         return {
             "msno": msno,
             "churn_probability": churn_prob,
             "is_churn": int(churn_prob >= CHURN_THRESHOLD),
+            "member_found": member_found,
         }
 
     def predict_batch(self, msnos: list[str]) -> list[dict]:

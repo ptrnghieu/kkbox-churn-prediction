@@ -224,6 +224,14 @@ with tab1:
                     data = resp.json()
                     prob = data["churn_probability"]
                     is_churn = data["is_churn"]
+                    member_found = data.get("member_found", True)
+
+                    if not member_found:
+                        st.warning(
+                            "Member not found in feature store. "
+                            "Prediction uses population-average features and may not be reliable.",
+                            icon="⚠️",
+                        )
 
                     st.markdown('<p class="card-title">Prediction Result</p>', unsafe_allow_html=True)
 
