@@ -510,16 +510,14 @@ with tab3:
         unsafe_allow_html=True,
     )
 
-    if st.button("↻ Refresh", key="refresh_stats"):
-        st.session_state.pop("stats_cache", None)
+    col_refresh, _ = st.columns([1, 5])
+    with col_refresh:
+        st.button("↻ Refresh", key="refresh_stats")
 
     try:
-        if "stats_cache" not in st.session_state:
-            r = requests.get(f"{api_url}/stats", timeout=5)
-            r.raise_for_status()
-            st.session_state["stats_cache"] = r.json()
-
-        s = st.session_state["stats_cache"]
+        r = requests.get(f"{api_url}/stats", timeout=5)
+        r.raise_for_status()
+        s = r.json()
         total      = s["total_predictions"]
         churn_n    = s["churn_count"]
         retain_n   = s["retain_count"]
