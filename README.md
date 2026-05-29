@@ -122,6 +122,31 @@ python model_pipeline/training/train.py \
 
 Environment variables:
 
+<<<<<<< HEAD
+- Check entities and features:
+  feast -c ../feature_store entities list
+  feast -c ../feature_store feature-views list
+
+- Materialize features to online store:
+  feast -c ../feature_store materialize 2026-01-1 2026-05-25
+
+## API serving
+
+- How to start:
+  cd serving_pipeline
+  venv\Scripts\activate or source venv/bin/activate
+  uvicorn app.main:app --reload
+
+  grafana: http://localhost:3000 (admin:admin)
+
+# Mornitoring
+
+- How to start:
+  cd monitoring_pipeline
+  docker-compose up -d
+
+## Docs
+=======
 | Variable | Default | Mô tả |
 |----------|---------|-------|
 | `GCP_PROJECT_ID` | `kkbox-churn-prediction-493716` | GCP project |
@@ -163,3 +188,4 @@ docker-compose up -d
 make spark-bronze-silver   # Bronze → Silver
 make spark-silver-gold     # Silver → Gold
 ```
+>>>>>>> 23a6bda890317f2f43ef6094774f0b93b58ed025
