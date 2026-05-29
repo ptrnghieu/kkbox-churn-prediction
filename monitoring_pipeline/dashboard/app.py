@@ -202,10 +202,23 @@ with tab1:
 
     with left:
         st.markdown('<p class="card-title">Member Lookup</p>', unsafe_allow_html=True)
+
+        # Random sample button (outside form so it triggers immediately)
+        if st.button("🎲 Random sample", key="random_btn"):
+            try:
+                r = requests.get(f"{api_url}/sample?n=1", timeout=5)
+                r.raise_for_status()
+                msnos = r.json().get("msnos", [])
+                if msnos:
+                    st.session_state["msno_input"] = msnos[0]
+            except Exception:
+                st.warning("Could not fetch sample from API.")
+
         with st.form("single_form"):
             msno = st.text_input(
                 "Member ID (msno)",
                 placeholder="e.g. 9bq7LhZP3z8FutAux8UkG13mSW...",
+                value=st.session_state.get("msno_input", ""),
             )
             predict_btn = st.form_submit_button("Predict churn risk", use_container_width=True, type="primary")
 

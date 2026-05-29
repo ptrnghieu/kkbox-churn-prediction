@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
+import random
 from time import perf_counter
 
+import redis as redis_lib
 from fastapi import FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -47,6 +49,34 @@ async def prometheus_http_middleware(request: Request, call_next):
 @app.get("/health", tags=["Health Check"])
 def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/sample", tags=["Utility"])
+def sample_msnos(n: int = 5):
+    """Return n random msno values that exist in the online feature store."""
+    try:
+        r = redis_lib.Redis(host="10.80.68.19", port=6379, socket_timeout=3)
+        # RANDOMKEY is O(1) — call it n times
+        msnos = set()
+        attempts = 0
+        while len(msnos) < n and attempts < n * 10:
+            raw = r.randomkey()
+            attempts += 1
+            if raw is None:
+                break
+            s = raw.decode("latin-1")
+            if "msno" in s and "kkbox_churn" in s:
+                try:
+                    start = s.index("msno") + 9  # 4 (tag) + 5 (length prefix bytes)
+                    end = s.index("kkbox_churn")
+                    msno = s[start:end]
+                    if len(msno) > 10:
+                        msnos.add(msno)
+                except ValueError:
+                    pass
+        return {"msnos": list(msnos)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Cannot reach feature store: {exc}")
 
 @app.get("/test_error", tags=["Testing"])
 def test_error():
