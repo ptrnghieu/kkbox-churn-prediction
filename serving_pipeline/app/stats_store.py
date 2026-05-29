@@ -1,8 +1,9 @@
 """Simple in-memory prediction statistics and history store."""
 import threading
 from collections import deque
+from datetime import datetime, timezone
 
-_MAX_HISTORY = 2000  # cap to avoid unbounded memory growth
+_MAX_HISTORY = 2000
 
 _lock = threading.Lock()
 _stats = {"total": 0, "churn": 0, "retain": 0}
@@ -10,11 +11,16 @@ _churn_history: deque[dict] = deque(maxlen=_MAX_HISTORY)
 
 
 def record(msno: str, churn_probability: float, is_churn: int) -> None:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     with _lock:
         _stats["total"] += 1
         if is_churn:
             _stats["churn"] += 1
-            _churn_history.append({"msno": msno, "churn_probability": churn_probability})
+            _churn_history.append({
+                "msno": msno,
+                "churn_probability": churn_probability,
+                "predicted_at": now,
+            })
         else:
             _stats["retain"] += 1
 

@@ -546,15 +546,20 @@ with tab3:
                     st.markdown('<p class="card-title">All Predicted Churn Users</p>', unsafe_allow_html=True)
                     churn_df = pd.DataFrame(churned)
                     churn_df["Score"] = churn_df["churn_probability"].map(lambda x: f"{x:.1%}")
-                    churn_df = churn_df.rename(columns={"msno": "Member ID", "churn_probability": "Probability"})
+                    churn_df = churn_df.rename(columns={
+                        "msno": "Member ID",
+                        "churn_probability": "Probability",
+                        "predicted_at": "Predicted At",
+                    })
 
                     search = st.text_input("🔍 Filter by Member ID", placeholder="Type to filter...", key="churn_search")
                     if search:
                         churn_df = churn_df[churn_df["Member ID"].str.contains(search, case=False, na=False)]
 
                     st.markdown(f'<p style="font-size:0.8rem;color:#9ca3af;margin-bottom:0.5rem;">{len(churn_df)} users predicted to churn</p>', unsafe_allow_html=True)
+                    display_cols = [c for c in ["Member ID", "Score", "Predicted At"] if c in churn_df.columns]
                     st.dataframe(
-                        churn_df[["Member ID", "Score"]],
+                        churn_df[display_cols],
                         use_container_width=True,
                         hide_index=True,
                         height=min(400, 40 + len(churn_df) * 35),
