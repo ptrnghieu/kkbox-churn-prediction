@@ -60,7 +60,7 @@ def _reset_kafka_topics() -> None:
     """Delete Kafka topics so each simulation starts from a clean slate."""
     for topic in ["kkbox.user_logs", "kkbox.transactions"]:
         result = subprocess.run(
-            ["docker", "exec", "kafka", "kafka-topics.sh",
+            ["docker", "exec", "kafka", "kafka-topics",
              "--delete", "--topic", topic,
              "--bootstrap-server", "localhost:9092"],
             capture_output=True, timeout=10,
