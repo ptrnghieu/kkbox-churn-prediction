@@ -211,7 +211,8 @@ def _notify(url: str, date: str, msnos: list) -> None:
 
 
 def consume(bootstrap_servers: str, dry_run: bool,
-            notify_url: str = None, group_id: str = "kkbox-feature-consumer") -> None:
+            notify_url: str = None, group_id: str = "kkbox-feature-consumer",
+            auto_offset_reset: str = "earliest") -> None:
     bq = bigquery.Client(project=GCP_PROJECT_ID)
     if not dry_run:
         ensure_table(bq)
@@ -222,7 +223,7 @@ def consume(bootstrap_servers: str, dry_run: bool,
         TOPIC_TRANSACTIONS,
         bootstrap_servers=bootstrap_servers,
         group_id=group_id,
-        auto_offset_reset="earliest",
+        auto_offset_reset=auto_offset_reset,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
         consumer_timeout_ms=30_000,  # stop after 30s idle
     )
@@ -309,12 +310,19 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("KAFKA_GROUP_ID", "kkbox-feature-consumer"),
         help="Kafka consumer group ID (default: kkbox-feature-consumer)",
     )
+    p.add_argument(
+        "--offset-reset",
+        default="earliest",
+        choices=["earliest", "latest"],
+        help="auto_offset_reset policy (default: earliest)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s",
-             args.bootstrap_servers, args.dry_run, args.group_id)
+    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s  offset_reset=%s",
+             args.bootstrap_servers, args.dry_run, args.group_id, args.offset_reset)
     consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run,
-            notify_url=args.notify_url, group_id=args.group_id)
+            notify_url=args.notify_url, group_id=args.group_id,
+            auto_offset_reset=args.offset_reset)

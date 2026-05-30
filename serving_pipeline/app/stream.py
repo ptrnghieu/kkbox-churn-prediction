@@ -59,13 +59,15 @@ async def _broadcast(event_type: str, data: dict) -> None:
 def _reset_kafka_topics() -> None:
     """Delete Kafka topics so each simulation starts from a clean slate."""
     for topic in ["kkbox.user_logs", "kkbox.transactions"]:
-        subprocess.run(
+        result = subprocess.run(
             ["docker", "exec", "kafka", "kafka-topics.sh",
              "--delete", "--topic", topic,
              "--bootstrap-server", "localhost:9092"],
             capture_output=True, timeout=10,
         )
-    time.sleep(3)  # wait for deletion to propagate
+        if result.returncode != 0:
+            logger.warning("Topic delete failed for %s: %s", topic,
+                           result.stderr.decode(errors="replace").strip())
 
 
 # ── Process monitor ───────────────────────────────────────────────────────────
@@ -104,6 +106,7 @@ async def stream_start(req: StartRequest) -> dict:
         raise HTTPException(400, "Stream already active — call /stream/stop first")
 
     _reset_kafka_topics()
+    await asyncio.sleep(3)  # give Kafka time to propagate the deletion
 
     _state.update({
         "status": "running",
@@ -125,7 +128,8 @@ async def stream_start(req: StartRequest) -> dict:
          os.path.join(_REPO_ROOT, "data_pipeline/ingestion/kafka_consumer.py"),
          "--bootstrap-servers", "localhost:9093",
          "--group-id", group_id,
-         "--notify-url", "http://localhost:8000/stream/notify"],
+         "--notify-url", "http://localhost:8000/stream/notify",
+         "--offset-reset", "latest"],
         env=env,
     )
     producer_proc = subprocess.Popen(
