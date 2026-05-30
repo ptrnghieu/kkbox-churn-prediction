@@ -189,5 +189,21 @@ class PredictionService:
             "reasons": reasons,
         }
 
+    def _predict_single_fast(self, msno: str) -> dict:
+        """Like predict_single but skips SHAP — used by batch to save time."""
+        features = self._get_features(msno)
+        feature_values = {k: v for k, v in features.items() if k != "msno"}
+        member_found = bool(feature_values) and any(v is not None for v in feature_values.values())
+        X = _preprocess(features, self.preprocessing_config, self.feature_cols)
+        churn_prob = self._predict(X)
+        is_churn = int(churn_prob >= CHURN_THRESHOLD)
+        return {
+            "msno": msno,
+            "churn_probability": churn_prob,
+            "is_churn": is_churn,
+            "member_found": member_found,
+            "reasons": [],
+        }
+
     def predict_batch(self, msnos: list[str]) -> list[dict]:
-        return [self.predict_single(msno) for msno in msnos]
+        return [self._predict_single_fast(msno) for msno in msnos]

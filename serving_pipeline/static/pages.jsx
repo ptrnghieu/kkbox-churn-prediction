@@ -9,10 +9,10 @@ async function apiGet(base, path) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
-async function apiPost(base, path, body) {
+async function apiPost(base, path, body, timeoutMs = 30000) {
   const r = await fetch(`${base}${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
+    body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -304,12 +304,14 @@ function BatchPage({ apiUrl = 'http://localhost:8000' }) {
   };
 
   const runBatch = async () => {
-    setRunning(true);
+    setRunning(true); setOffline(false);
     try {
-      const data = await apiPost(apiUrl, '/predict/batch', { msno_list: msnos });
+      // 120s timeout — 5000 users × Redis lookup + inference can take ~60-90s
+      const data = await apiPost(apiUrl, '/predict/batch', { msno_list: msnos }, 120000);
       setResults(data); setOffline(false);
-    } catch {
-      setResults(genBatch(msnos?.length || 600)); setOffline(true);
+    } catch (err) {
+      setOffline(err?.message || 'Request failed or timed out');
+      setResults(null);
     }
     setRunning(false);
   };
@@ -325,7 +327,12 @@ function BatchPage({ apiUrl = 'http://localhost:8000' }) {
       <p style={{ fontSize: '0.83rem', color: '#6b7280', marginBottom: '1rem' }}>
         Upload a CSV with a column named <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 4 }}>msno</code>. Results include churn probability and risk label.
       </p>
-      {offline && <OfflineBanner />}
+      {offline && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
+          padding: '0.55rem 0.85rem', fontSize: '0.77rem', color: '#dc2626', marginBottom: '0.9rem' }}>
+          ⚠ Batch request failed: {typeof offline === 'string' ? offline : 'unknown error'}. Check the API server or try a smaller file.
+        </div>
+      )}
       {!file ? (
         <div className={`upload-zone ${drag ? 'drag-over' : ''}`}
           onClick={() => fileRef.current.click()}
