@@ -14,6 +14,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app import feature_cache
+
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Streaming"])
 
@@ -178,6 +180,7 @@ async def stream_stop() -> dict:
     _state.update({"status": "idle", "producer_pid": None, "consumer_pid": None,
                    "current_date": None, "dates_done": []})
     _date_users.clear()
+    feature_cache.clear()
     await _broadcast("status", {"status": "idle"})
     return {"status": "stopped"}
 
@@ -190,6 +193,7 @@ async def stream_notify(req: NotifyRequest) -> dict:
         _state["dates_done"].append(req.date)
     if req.msnos:
         _date_users[req.date] = req.msnos
+        feature_cache.update(req.date, req.msnos)
     await _broadcast("date_done", {
         "date": req.date,
         "user_count": len(req.msnos),
