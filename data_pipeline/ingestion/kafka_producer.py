@@ -24,6 +24,7 @@ import logging
 import os
 import tempfile
 import time
+from collections import defaultdict
 from datetime import date, datetime
 
 import pandas as pd
@@ -120,35 +121,37 @@ def replay(speed: float, dry_run: bool) -> None:
     tx_path = _download_to_disk(gcs_client, TRANSACTIONS_V2)
 
     try:
-        # ── Load with memory-optimised dtypes ──────────────────────────────
-        log.info("Loading user_logs from disk (dtype-optimised) ...")
-        user_logs = pd.read_csv(ul_path, dtype=_UL_DTYPES)
-        user_logs["date"] = pd.to_datetime(
-            user_logs["date"].astype(str), format=DATE_FORMAT
-        ).dt.date
-        user_logs = user_logs[user_logs["date"] >= STREAM_START_DATE]
+        # ── Chunked loading — avoids pandas parsing the full 1.3 GB at once ─
+        log.info("Loading user_logs in chunks (200 k rows each) ...")
+        logs_by_date: dict[date, list] = defaultdict(list)
+        ul_rows = 0
+        for chunk in pd.read_csv(ul_path, dtype=_UL_DTYPES, chunksize=200_000):
+            chunk["date"] = pd.to_datetime(
+                chunk["date"].astype(str), format=DATE_FORMAT
+            ).dt.date
+            chunk = chunk[chunk["date"] >= STREAM_START_DATE]
+            ul_rows += len(chunk)
+            for d, grp in chunk.groupby("date"):
+                logs_by_date[d].append(grp.reset_index(drop=True))
+        gc.collect()
 
-        log.info("Loading transactions from disk (dtype-optimised) ...")
-        transactions = pd.read_csv(tx_path, dtype=_TX_DTYPES)
-        transactions["transaction_date"] = pd.to_datetime(
-            transactions["transaction_date"].astype(str), format=DATE_FORMAT
-        ).dt.date
-        transactions = transactions[transactions["transaction_date"] >= STREAM_START_DATE]
+        log.info("Loading transactions in chunks (50 k rows each) ...")
+        txns_by_date: dict[date, list] = defaultdict(list)
+        tx_rows = 0
+        for chunk in pd.read_csv(tx_path, dtype=_TX_DTYPES, chunksize=50_000):
+            chunk["transaction_date"] = pd.to_datetime(
+                chunk["transaction_date"].astype(str), format=DATE_FORMAT
+            ).dt.date
+            chunk = chunk[chunk["transaction_date"] >= STREAM_START_DATE]
+            tx_rows += len(chunk)
+            for d, grp in chunk.groupby("transaction_date"):
+                txns_by_date[d].append(grp.reset_index(drop=True))
+        gc.collect()
 
         log.info(
             "After filter (>= %s): user_logs=%d rows, transactions=%d rows",
-            STREAM_START_DATE, len(user_logs), len(transactions),
+            STREAM_START_DATE, ul_rows, tx_rows,
         )
-
-        # ── Build date-keyed dicts, then free the raw DataFrames ───────────
-        log.info("Grouping by date ...")
-        logs_by_date = {d: grp for d, grp in user_logs.groupby("date")}
-        del user_logs
-        gc.collect()
-
-        txns_by_date = {d: grp for d, grp in transactions.groupby("transaction_date")}
-        del transactions
-        gc.collect()
 
         all_dates = sorted(set(logs_by_date) | set(txns_by_date))
         log.info(
@@ -164,9 +167,11 @@ def replay(speed: float, dry_run: bool) -> None:
         for current_date in all_dates:
             log.info("--- %s ---", current_date)
 
-            # .pop() frees each date's DataFrame from memory after sending
+            # concat + pop frees each date's chunk list from memory after sending
             if current_date in logs_by_date:
-                records = logs_by_date.pop(current_date).to_dict(orient="records")
+                df = pd.concat(logs_by_date.pop(current_date), ignore_index=True)
+                records = df.to_dict(orient="records")
+                del df
                 for record in records:
                     record["date"] = current_date.isoformat()
                     if not dry_run:
@@ -175,7 +180,9 @@ def replay(speed: float, dry_run: bool) -> None:
                 log.info("  user_logs:    %d", len(records))
 
             if current_date in txns_by_date:
-                records = txns_by_date.pop(current_date).to_dict(orient="records")
+                df = pd.concat(txns_by_date.pop(current_date), ignore_index=True)
+                records = df.to_dict(orient="records")
+                del df
                 for record in records:
                     record["transaction_date"] = current_date.isoformat()
                     if not dry_run:
