@@ -199,7 +199,19 @@ def materialize(date_str: str, dry_run: bool) -> None:
 
 # ── Consumer ──────────────────────────────────────────────────────────────────
 
-def consume(bootstrap_servers: str, dry_run: bool) -> None:
+def _notify(url: str, date: str, msnos: list) -> None:
+    """POST date + msnos to the stream controller (best-effort)."""
+    import urllib.request
+    body = json.dumps({"date": date, "msnos": msnos}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        log.warning("Failed to notify %s for date %s: %s", url, date, exc)
+
+
+def consume(bootstrap_servers: str, dry_run: bool,
+            notify_url: str = None, group_id: str = "kkbox-feature-consumer") -> None:
     bq = bigquery.Client(project=GCP_PROJECT_ID)
     if not dry_run:
         ensure_table(bq)
@@ -209,7 +221,7 @@ def consume(bootstrap_servers: str, dry_run: bool) -> None:
         TOPIC_USER_LOGS,
         TOPIC_TRANSACTIONS,
         bootstrap_servers=bootstrap_servers,
-        group_id="kkbox-feature-consumer",
+        group_id=group_id,
         auto_offset_reset="earliest",
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
         consumer_timeout_ms=30_000,  # stop after 30s idle
@@ -230,6 +242,10 @@ def consume(bootstrap_servers: str, dry_run: bool) -> None:
         write_to_bq(bq, rows, dry_run)
         materialize(date, dry_run)
         flushed_dates.add(date)
+        # Notify stream controller with list of processed msnos
+        if notify_url:
+            all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
+            _notify(notify_url, date, all_msno)
         # Free memory
         del logs_by_date[date]
         del txns_by_date[date]
@@ -283,10 +299,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Consume and aggregate without writing to BigQuery or Redis",
     )
+    p.add_argument(
+        "--notify-url",
+        default=None,
+        help="URL to POST after each date is flushed (used by streaming simulation UI)",
+    )
+    p.add_argument(
+        "--group-id",
+        default=os.getenv("KAFKA_GROUP_ID", "kkbox-feature-consumer"),
+        help="Kafka consumer group ID (default: kkbox-feature-consumer)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    log.info("Starting consumer — servers=%s  dry_run=%s", args.bootstrap_servers, args.dry_run)
-    consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run)
+    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s",
+             args.bootstrap_servers, args.dry_run, args.group_id)
+    consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run,
+            notify_url=args.notify_url, group_id=args.group_id)

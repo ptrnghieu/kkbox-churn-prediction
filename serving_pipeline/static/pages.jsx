@@ -155,11 +155,15 @@ function ContributingFactors({ msno, prob, shapValues = null }) {
 }
 
 // ─── Single User Page ─────────────────────────────────────────────────────────
-function SingleUserPage({ apiUrl = 'http://localhost:8000' }) {
-  const [msno, setMsno] = useState('');
+function SingleUserPage({ apiUrl = '', selectedMsno = '' }) {
+  const [msno, setMsno] = useState(selectedMsno || '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    if (selectedMsno) { setMsno(selectedMsno); setResult(null); }
+  }, [selectedMsno]);
 
   const handleRandom = async () => {
     try {
@@ -680,4 +684,219 @@ function APIHealthPage({ apiUrl = 'http://localhost:8000' }) {
   );
 }
 
-Object.assign(window, { SingleUserPage, BatchPage, StatisticsPage, ModelInfoPage, APIHealthPage });
+// ─── Streaming Simulation Page ────────────────────────────────────────────────
+function StreamingPage({ apiUrl = '', onSelectMsno }) {
+  const [streamStatus, setStreamStatus] = useState('idle');
+  const [currentDate, setCurrentDate] = useState(null);
+  const [datesDone, setDatesDone] = useState(0);
+  const [datesList, setDatesList] = useState([]);
+  const [speed, setSpeed] = useState(55);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [usersData, setUsersData] = useState(null);
+  const [userPage, setUserPage] = useState(1);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const esRef = useRef(null);
+  const TOTAL_DAYS = 31;
+
+  // SSE subscription
+  useEffect(() => {
+    const es = new EventSource(`${apiUrl}/stream/events`);
+    esRef.current = es;
+    es.addEventListener('status', e => {
+      const d = JSON.parse(e.data);
+      if (d.status) setStreamStatus(d.status);
+      if (d.current_date) setCurrentDate(d.current_date);
+      if (d.dates_done !== undefined) setDatesDone(d.dates_done);
+    });
+    es.addEventListener('date_done', e => {
+      const d = JSON.parse(e.data);
+      setCurrentDate(d.date);
+      setDatesDone(d.dates_done);
+      setDatesList(prev => [...new Set([...prev, d.date])].sort());
+      setSelectedDate(d.date);
+      setUserPage(1);
+    });
+    return () => es.close();
+  }, [apiUrl]);
+
+  // Load users when date or page changes
+  useEffect(() => {
+    if (!selectedDate) return;
+    setLoadingUsers(true);
+    apiGet(apiUrl, `/stream/users?date=${selectedDate}&page=${userPage}&limit=20`)
+      .then(d => setUsersData(d))
+      .catch(() => setUsersData(null))
+      .finally(() => setLoadingUsers(false));
+  }, [selectedDate, userPage, apiUrl]);
+
+  const handleStart = () => {
+    setDatesList([]); setDatesDone(0); setCurrentDate(null);
+    setSelectedDate(null); setUsersData(null);
+    apiPost(apiUrl, '/stream/start', { speed }).catch(() => {});
+  };
+  const handlePause  = () => apiPost(apiUrl, '/stream/pause',  {}).catch(() => {});
+  const handleResume = () => apiPost(apiUrl, '/stream/resume', {}).catch(() => {});
+  const handleStop   = () => apiPost(apiUrl, '/stream/stop',   {}).catch(() => {});
+
+  const isIdle    = streamStatus === 'idle';
+  const isRunning = streamStatus === 'running';
+  const isPaused  = streamStatus === 'paused';
+  const isDone    = streamStatus === 'done';
+  const isActive  = isRunning || isPaused;
+
+  const progress = Math.min(datesDone / TOTAL_DAYS, 1);
+  const statusColor = { idle: '#9ca3af', running: '#16a34a', paused: '#d97706', done: '#CF6F3C', error: '#dc2626' }[streamStatus] || '#9ca3af';
+  const statusLabel = { idle: 'Idle', running: 'Streaming…', paused: 'Paused', done: 'Complete', error: 'Error' }[streamStatus] || '';
+
+  return (
+    <div>
+      {/* Control Panel */}
+      <div className="card" style={{ marginBottom: '1.25rem' }}>
+        <CardTitle>Historical Playback — March 2017</CardTitle>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '0.9rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <div style={{ width: 9, height: 9, borderRadius: '50%', background: statusColor, flexShrink: 0,
+              boxShadow: isRunning ? `0 0 7px ${statusColor}` : 'none',
+              animation: isRunning ? 'pulse 2s infinite' : 'none' }} />
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: statusColor }}>{statusLabel}</span>
+          </div>
+          {currentDate && (
+            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums' }}>
+              📅 {currentDate}
+            </div>
+          )}
+          {datesDone > 0 && (
+            <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Day {datesDone} / {TOTAL_DAYS}</span>
+          )}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ background: '#f3f4f6', borderRadius: 6, height: 8, overflow: 'hidden', marginBottom: '1rem' }}>
+          <div style={{ height: '100%', borderRadius: 6, width: `${progress * 100}%`,
+            background: isDone ? 'linear-gradient(90deg,#CF6F3C,#e8954a)' : 'linear-gradient(90deg,#86efac,#16a34a)',
+            transition: 'width 0.6s ease' }} />
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {(isIdle || isDone) && (
+            <button className="btn btn-primary" onClick={handleStart}>▶ {isDone ? 'Restart' : 'Start Simulation'}</button>
+          )}
+          {isRunning && <button className="btn btn-secondary" onClick={handlePause}>⏸ Pause</button>}
+          {isPaused  && <button className="btn btn-primary"   onClick={handleResume}>▶ Resume</button>}
+          {isActive  && (
+            <button className="btn btn-secondary" style={{ color: '#dc2626' }} onClick={handleStop}>⏹ Stop</button>
+          )}
+
+          {isIdle && !isDone && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', fontSize: '0.8rem', color: '#6b7280' }}>
+              <span>Speed:</span>
+              <select className="input" style={{ width: 'auto', padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                value={speed} onChange={e => setSpeed(Number(e.target.value))}>
+                <option value={5}>5s / day (fast)</option>
+                <option value={30}>30s / day</option>
+                <option value={55}>55s / day (demo)</option>
+                <option value={120}>2min / day (slow)</option>
+              </select>
+            </div>
+          )}
+          {isActive && (
+            <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#9ca3af' }}>
+              {speed}s / day · pause anytime to interact
+            </span>
+          )}
+        </div>
+
+        {isIdle && !isDone && (
+          <p style={{ fontSize: '0.78rem', color: '#9ca3af', marginTop: '0.85rem', lineHeight: 1.65 }}>
+            Replays KKBox streaming data from March 2017 through Kafka → BigQuery → Feast → Redis.
+            Each day a new batch of users appears below. Click <strong>Predict →</strong> on any user
+            to jump to the Single User page and run a churn prediction.
+          </p>
+        )}
+      </div>
+
+      {/* Date chips + User list */}
+      {datesList.length > 0 && (
+        <div className="two-col" style={{ alignItems: 'start' }}>
+
+          {/* Date chips */}
+          <div className="card">
+            <div className="card-title">Processed Dates ({datesList.length})</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {datesList.map(d => (
+                <button key={d}
+                  onClick={() => { setSelectedDate(d); setUserPage(1); }}
+                  style={{ padding: '0.3rem 0.75rem', borderRadius: 6, border: '1px solid',
+                    borderColor: selectedDate === d ? '#CF6F3C' : '#e5e7eb',
+                    background: selectedDate === d ? 'rgba(207,111,60,0.09)' : 'white',
+                    color: selectedDate === d ? '#CF6F3C' : '#374151',
+                    fontSize: '0.8rem', fontWeight: selectedDate === d ? 600 : 400,
+                    cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* User list */}
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.75rem' }}>
+              <div className="card-title" style={{ margin: 0 }}>
+                Users — {selectedDate || '—'}
+                {usersData ? ` (${usersData.total.toLocaleString()})` : ''}
+              </div>
+            </div>
+
+            {loadingUsers ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}><Spinner /></div>
+            ) : usersData && usersData.users.length > 0 ? (
+              <>
+                <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+                  <table className="data-table">
+                    <thead><tr><th>Member ID</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {usersData.users.map((msno, i) => (
+                        <tr key={i}>
+                          <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{fmtMsno(msno)}</td>
+                          <td>
+                            <button onClick={() => onSelectMsno && onSelectMsno(msno)}
+                              style={{ padding: '0.25rem 0.75rem', borderRadius: 6,
+                                border: '1px solid #CF6F3C', background: 'rgba(207,111,60,0.06)',
+                                color: '#CF6F3C', fontSize: '0.75rem', fontWeight: 600,
+                                cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                              Predict →
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {usersData.pages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: '0.75rem' }}>
+                    <button className="btn btn-secondary" style={{ padding: '0.3rem 0.75rem', fontSize: '0.78rem' }}
+                      disabled={userPage === 1} onClick={() => setUserPage(p => p - 1)}>‹ Prev</button>
+                    <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>{userPage} / {usersData.pages}</span>
+                    <button className="btn btn-secondary" style={{ padding: '0.3rem 0.75rem', fontSize: '0.78rem' }}
+                      disabled={userPage === usersData.pages} onClick={() => setUserPage(p => p + 1)}>Next ›</button>
+                  </div>
+                )}
+              </>
+            ) : selectedDate ? (
+              <div className="empty-state" style={{ minHeight: 120 }}>
+                <span style={{ fontSize: '0.82rem' }}>
+                  {usersData && usersData.total === 0 ? 'No users found for this date' : 'Waiting for data…'}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+        </div>
+      )}
+    </div>
+  );
+}
+
+Object.assign(window, { SingleUserPage, BatchPage, StatisticsPage, ModelInfoPage, APIHealthPage, StreamingPage });

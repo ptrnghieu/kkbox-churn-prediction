@@ -242,16 +242,18 @@
       { id: 'single',   label: 'Single User',       icon: '🔍', sub: 'Real-time prediction'    },
       { id: 'batch',    label: 'Batch Prediction',  icon: '📦', sub: 'CSV bulk scoring'         },
       { id: 'stats',    label: 'Statistics',         icon: '📈', sub: 'Prediction counts'        },
+      { id: 'stream',   label: 'Streaming',          icon: '⏱',  sub: 'Historical replay'        },
       { id: 'model',    label: 'Model Info',         icon: '🤖', sub: 'XGBoost performance'      },
       { id: 'health',   label: 'API Health',         icon: '💚', sub: 'Service status'           },
     ];
 
     const PAGE_META = {
-      single:  { title: 'Single User',      sub: 'Predict subscriber churn probability using real-time feature lookup.' },
-      batch:   { title: 'Batch Prediction', sub: 'Score multiple users at once from a CSV file.' },
-      stats:   { title: 'Statistics',       sub: 'Cumulative prediction counts since the API last started.' },
-      model:   { title: 'Model Info',       sub: 'XGBoost classifier — performance metrics, ROC curve, and feature importance.' },
-      health:  { title: 'API Health',       sub: 'Live status of serving infrastructure and endpoints.' },
+      single:  { title: 'Single User',           sub: 'Predict subscriber churn probability using real-time feature lookup.' },
+      batch:   { title: 'Batch Prediction',      sub: 'Score multiple users at once from a CSV file.' },
+      stats:   { title: 'Statistics',            sub: 'Cumulative prediction counts since the API last started.' },
+      stream:  { title: 'Streaming Simulation',  sub: 'Replay March 2017 data through the full pipeline. Click any user to predict.' },
+      model:   { title: 'Model Info',            sub: 'XGBoost classifier — performance metrics, ROC curve, and feature importance.' },
+      health:  { title: 'API Health',            sub: 'Live status of serving infrastructure and endpoints.' },
     };
 
     // Empty string = same origin as this page (API is served by same FastAPI process)
@@ -334,13 +336,17 @@
       const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
       const [page, setPage] = useState('single');
       const [online, setOnline] = useState(true);
+      const [selectedMsno, setSelectedMsno] = useState('');
 
       // Apply accent color from tweaks
       document.documentElement.style.setProperty('--accent', t.accent);
       document.documentElement.style.setProperty('--accent-h',
         t.accent === '#CF6F3C' ? '#b85e2f' : t.accent + 'cc');
 
-      const PageComp = { single: SingleUserPage, batch: BatchPage, stats: StatisticsPage, model: ModelInfoPage, health: APIHealthPage }[page];
+      const handleSelectMsno = (msno) => { setSelectedMsno(msno); setPage('single'); };
+
+      const PageComp = { single: SingleUserPage, batch: BatchPage, stats: StatisticsPage,
+        stream: StreamingPage, model: ModelInfoPage, health: APIHealthPage }[page];
 
       // Live sidebar health check
       useEffect(() => {
@@ -359,7 +365,9 @@
           <div className="main">
             <PageHeader page={page} />
             <div className="page-content">
-              <PageComp apiUrl={t.apiUrl} />
+              <PageComp apiUrl={t.apiUrl}
+                selectedMsno={page === 'single' ? selectedMsno : undefined}
+                onSelectMsno={handleSelectMsno} />
             </div>
           </div>
           <TweaksPanel>
