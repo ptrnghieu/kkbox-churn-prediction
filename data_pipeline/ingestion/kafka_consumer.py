@@ -248,16 +248,17 @@ def consume(bootstrap_servers: str, dry_run: bool,
     def flush(date: str) -> None:
         if date in flushed_dates:
             return
+        all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
         log.info("Flushing date %s — logs: %d users, txns: %d users",
                  date, len(logs_by_date[date]), len(txns_by_date[date]))
+        # Notify UI FIRST so users appear immediately, before the slow
+        # BigQuery write + Feast materialize operations complete
+        if notify_url:
+            _notify(notify_url, date, all_msno)
+        flushed_dates.add(date)
         rows = build_rows(date, logs_by_date[date], txns_by_date[date], members)
         write_to_bq(bq, rows, dry_run)
         materialize(date, dry_run)
-        flushed_dates.add(date)
-        # Notify stream controller with list of processed msnos
-        if notify_url:
-            all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
-            _notify(notify_url, date, all_msno)
         # Free memory
         del logs_by_date[date]
         del txns_by_date[date]
@@ -266,6 +267,14 @@ def consume(bootstrap_servers: str, dry_run: bool,
         for msg in consumer:
             record = msg.value
             topic  = msg.topic
+
+            # End-of-day marker sent by producer after each day's data
+            if record.get("_end_of_day"):
+                eod_date = record.get("date", "")[:10]
+                if eod_date and eod_date not in flushed_dates:
+                    flush(eod_date)
+                current_date = None
+                continue
 
             if topic == TOPIC_USER_LOGS:
                 date = record.get("date", "")[:10]
@@ -280,7 +289,7 @@ def consume(bootstrap_servers: str, dry_run: bool,
             else:
                 continue
 
-            # Flush previous date when a new date is detected
+            # Fallback: flush previous date when a new date is detected
             if current_date and date != current_date and current_date not in flushed_dates:
                 flush(current_date)
 

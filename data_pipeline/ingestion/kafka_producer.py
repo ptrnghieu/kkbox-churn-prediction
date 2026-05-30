@@ -157,6 +157,11 @@ def replay(speed: float, dry_run: bool) -> None:
 
         if producer:
             producer.flush()
+            # End-of-day marker — tells the consumer to flush this date immediately
+            # without waiting for the next date's messages to arrive.
+            _send(producer, TOPIC_USER_LOGS, "__eod__",
+                  {"_end_of_day": True, "date": d.isoformat()})
+            producer.flush()
         if speed > 0:
             time.sleep(speed)
 
