@@ -1,9 +1,11 @@
 """FastAPI application entry point."""
-import random
+import os
 from time import perf_counter
 
 import redis as redis_lib
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.metrics import (
@@ -13,10 +15,18 @@ from app.metrics import (
 )
 from app import stats_store
 from app.predict import router as predict_router
+from app.explain import router as explain_router
 
 app = FastAPI(
     title="KKBox Churn Prediction API",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -95,3 +105,9 @@ def metrics():
 
 
 app.include_router(predict_router, prefix="/predict")
+app.include_router(explain_router, prefix="/explain")
+
+# Serve the React dashboard from /ui — must be mounted after API routes
+_static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+if os.path.isdir(_static_dir):
+    app.mount("/ui", StaticFiles(directory=_static_dir, html=True), name="dashboard")

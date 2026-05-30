@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+aiofiles
 pydantic
 scikit-learn
 xgboost
