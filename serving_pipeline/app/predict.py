@@ -10,9 +10,14 @@ from service.prediction import PredictionService
 
 router = APIRouter()
 
+_service: PredictionService | None = None
 
-def get_prediction_service():
-    return PredictionService()
+
+def get_prediction_service() -> PredictionService:
+    global _service
+    if _service is None:
+        _service = PredictionService()
+    return _service
 
 
 @router.post("/", response_model=PredictResponse, tags=["Prediction"])
