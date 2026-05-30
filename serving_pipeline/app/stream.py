@@ -6,7 +6,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from asyncio import Queue
 from typing import AsyncGenerator
 
@@ -54,22 +53,6 @@ async def _broadcast(event_type: str, data: dict) -> None:
             pass
 
 
-# ── Kafka topic reset ─────────────────────────────────────────────────────────
-
-def _reset_kafka_topics() -> None:
-    """Delete Kafka topics so each simulation starts from a clean slate."""
-    for topic in ["kkbox.user_logs", "kkbox.transactions"]:
-        result = subprocess.run(
-            ["docker", "exec", "kafka", "kafka-topics",
-             "--delete", "--topic", topic,
-             "--bootstrap-server", "localhost:9092"],
-            capture_output=True, timeout=10,
-        )
-        if result.returncode != 0:
-            logger.warning("Topic delete failed for %s: %s", topic,
-                           result.stderr.decode(errors="replace").strip())
-
-
 # ── Process monitor ───────────────────────────────────────────────────────────
 
 async def _monitor(producer_proc: subprocess.Popen, consumer_proc: subprocess.Popen) -> None:
@@ -104,9 +87,6 @@ class NotifyRequest(BaseModel):
 async def stream_start(req: StartRequest) -> dict:
     if _state["status"] in ("running", "paused"):
         raise HTTPException(400, "Stream already active — call /stream/stop first")
-
-    _reset_kafka_topics()
-    await asyncio.sleep(3)  # give Kafka time to propagate the deletion
 
     _state.update({
         "status": "running",
