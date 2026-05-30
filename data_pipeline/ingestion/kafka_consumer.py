@@ -227,6 +227,9 @@ def consume(bootstrap_servers: str, dry_run: bool,
         auto_offset_reset=auto_offset_reset,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
         consumer_timeout_ms=idle_timeout_ms,
+        # BQ write + Feast materialize can take several minutes per day;
+        # set max_poll_interval to 30 min so the consumer isn't kicked mid-flush
+        max_poll_interval_ms=1_800_000,
     )
     # Force partition assignment + offset seek NOW (before loading members)
     consumer.poll(timeout_ms=10_000)

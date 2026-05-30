@@ -117,6 +117,9 @@ async def stream_start(req: StartRequest) -> dict:
          "--idle-timeout-ms", str(idle_timeout_ms)],
         env=env,
     )
+    # Wait for consumer to join Kafka and lock its "latest" offset before the
+    # producer starts sending — prevents day 1 messages being missed
+    await asyncio.sleep(20)
     producer_proc = subprocess.Popen(
         [_PYTHON,
          os.path.join(_REPO_ROOT, "data_pipeline/ingestion/kafka_producer.py"),
