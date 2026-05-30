@@ -104,13 +104,17 @@ async def stream_start(req: StartRequest) -> dict:
            "FEAST_REPO_PATH": os.path.join(_REPO_ROOT, "feature_store"),
            "KAFKA_BOOTSTRAP_SERVERS": "localhost:9093"}
 
+    # idle_timeout = 3× the per-day speed (min 5 min) so consumer survives the
+    # full simulation without timing out between days
+    idle_timeout_ms = max(int(req.speed * 3 * 1000), 300_000)
     consumer_proc = subprocess.Popen(
         [_PYTHON,
          os.path.join(_REPO_ROOT, "data_pipeline/ingestion/kafka_consumer.py"),
          "--bootstrap-servers", "localhost:9093",
          "--group-id", group_id,
          "--notify-url", "http://localhost:8000/stream/notify",
-         "--offset-reset", "latest"],
+         "--offset-reset", "latest",
+         "--idle-timeout-ms", str(idle_timeout_ms)],
         env=env,
     )
     producer_proc = subprocess.Popen(

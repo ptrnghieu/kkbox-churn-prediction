@@ -212,12 +212,13 @@ def _notify(url: str, date: str, msnos: list) -> None:
 
 def consume(bootstrap_servers: str, dry_run: bool,
             notify_url: str = None, group_id: str = "kkbox-feature-consumer",
-            auto_offset_reset: str = "earliest") -> None:
+            auto_offset_reset: str = "earliest",
+            idle_timeout_ms: int = 30_000) -> None:
     bq = bigquery.Client(project=GCP_PROJECT_ID)
-    if not dry_run:
-        ensure_table(bq)
-    members = load_members(bq)
 
+    # Create KafkaConsumer FIRST so we claim the current "latest" offset
+    # before spending 60+ seconds loading member profiles from BigQuery.
+    # Messages produced after this poll() call will be visible to the consumer.
     consumer = KafkaConsumer(
         TOPIC_USER_LOGS,
         TOPIC_TRANSACTIONS,
@@ -225,8 +226,15 @@ def consume(bootstrap_servers: str, dry_run: bool,
         group_id=group_id,
         auto_offset_reset=auto_offset_reset,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
-        consumer_timeout_ms=30_000,  # stop after 30s idle
+        consumer_timeout_ms=idle_timeout_ms,
     )
+    # Force partition assignment + offset seek NOW (before loading members)
+    consumer.poll(timeout_ms=10_000)
+    log.info("Consumer partition assignment complete — offset position locked")
+
+    if not dry_run:
+        ensure_table(bq)
+    members = load_members(bq)
 
     # Buffer: date → msno → [records]
     logs_by_date: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
@@ -316,13 +324,19 @@ def parse_args() -> argparse.Namespace:
         choices=["earliest", "latest"],
         help="auto_offset_reset policy (default: earliest)",
     )
+    p.add_argument(
+        "--idle-timeout-ms",
+        type=int,
+        default=30_000,
+        help="Stop consuming after N ms of no messages (default: 30000)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s  offset_reset=%s",
-             args.bootstrap_servers, args.dry_run, args.group_id, args.offset_reset)
+    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s  offset_reset=%s  idle_timeout=%dms",
+             args.bootstrap_servers, args.dry_run, args.group_id, args.offset_reset, args.idle_timeout_ms)
     consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run,
             notify_url=args.notify_url, group_id=args.group_id,
-            auto_offset_reset=args.offset_reset)
+            auto_offset_reset=args.offset_reset, idle_timeout_ms=args.idle_timeout_ms)
