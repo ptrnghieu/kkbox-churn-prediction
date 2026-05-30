@@ -364,6 +364,36 @@ with tab1:
                     </p>
                     """, unsafe_allow_html=True)
 
+                    reasons = data.get("reasons", [])
+                    if reasons:
+                        if is_churn:
+                            header = "🔴 Lý do dự đoán churn"
+                            item_color = "#dc2626"
+                            bg = "#fef2f2"
+                            border = "#fecaca"
+                        else:
+                            header = "⚠️ Cảnh báo tiềm ẩn"
+                            item_color = "#b45309"
+                            bg = "#fffbeb"
+                            border = "#fde68a"
+
+                        items_html = "".join(
+                            f'<li style="margin-bottom:6px;color:{item_color};">{r}</li>'
+                            for r in reasons
+                        )
+                        st.markdown(f"""
+                        <div style="background:{bg};border:1px solid {border};
+                                    border-radius:10px;padding:0.9rem 1rem;margin-top:0.75rem;">
+                            <p style="font-size:0.78rem;font-weight:700;color:{item_color};
+                                      text-transform:uppercase;letter-spacing:0.07em;margin-bottom:0.5rem;">
+                                {header}
+                            </p>
+                            <ul style="margin:0;padding-left:1.2rem;font-size:0.85rem;line-height:1.6;">
+                                {items_html}
+                            </ul>
+                        </div>
+                        """, unsafe_allow_html=True)
+
                 except requests.exceptions.ConnectionError:
                     st.error("Cannot reach the API. Check the URL in the sidebar.")
                 except Exception as e:

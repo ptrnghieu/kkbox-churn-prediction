@@ -9,3 +9,5 @@ feast[gcp,redis]
 google-cloud-storage
 python-dotenv
 prometheus_client
+shap
+redis

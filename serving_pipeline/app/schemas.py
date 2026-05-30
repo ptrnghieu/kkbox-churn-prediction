@@ -11,7 +11,7 @@ class PredictRequest(BaseModel):
 
 class BatchPredictRequest(BaseModel):
     msno_list: list[str]
-    event_time: Optional[str] = None  # single event_time applied to all items in batch
+    event_time: Optional[str] = None
 
 
 class PredictResponse(BaseModel):
@@ -19,3 +19,4 @@ class PredictResponse(BaseModel):
     churn_probability: float
     is_churn: int
     member_found: bool = True
+    reasons: list[str] = []
