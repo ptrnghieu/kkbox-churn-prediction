@@ -20,3 +20,4 @@ class PredictResponse(BaseModel):
     is_churn: int
     member_found: bool = True
     reasons: list[str] = []
+    feature_timestamp: Optional[str] = None  # date the features were last updated

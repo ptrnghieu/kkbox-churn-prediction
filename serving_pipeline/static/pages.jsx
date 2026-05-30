@@ -224,7 +224,7 @@ function SingleUserPage({ apiUrl = '', selectedMsno = '' }) {
         {result && (
           <div style={{ marginTop: '1rem', background: '#fafaf9', borderRadius: 10, padding: '0.85rem 1rem', border: '1px solid #e5e7eb' }}>
             <div style={{ fontSize: '0.72rem', color: '#9ca3af', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>Details</div>
-            {[['Member ID', fmtMsno(result.msno)], ['Score', `${(result.churn_probability * 100).toFixed(2)}%`], ['Threshold', '78.9%'], ['Found in store', result.member_found ? 'Yes' : 'No (avg features used)']].map(([k, v]) => (
+            {[['Member ID', fmtMsno(result.msno)], ['Score', `${(result.churn_probability * 100).toFixed(2)}%`], ['Threshold', '78.9%'], ['Found in store', result.member_found ? 'Yes' : 'No (avg features used)'], ...(result.feature_timestamp ? [['Features as of', result.feature_timestamp]] : [])].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.3rem 0', borderBottom: '1px solid #f3f4f6', fontSize: '0.8rem' }}>
                 <span style={{ color: '#6b7280' }}>{k}</span>
                 <span style={{ color: '#111827', fontWeight: 600, fontFamily: k === 'Member ID' ? 'monospace' : 'inherit' }}>{v}</span>

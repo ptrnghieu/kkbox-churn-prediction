@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import tempfile
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -140,11 +141,21 @@ class PredictionService:
     def _get_features(self, msno: str) -> dict:
         try:
             with FeastFetchTimer():
-                feature_vector = self.store.get_online_features(
+                response = self.store.get_online_features(
                     features=self.feature_refs,
                     entity_rows=[{"msno": msno}],
-                ).to_dict()
-            return {k: v[0] for k, v in feature_vector.items()}
+                )
+            features = {k: v[0] for k, v in response.to_dict().items()}
+            # Extract event_timestamp from the first feature vector in the proto
+            try:
+                results = response.proto.results
+                if results and results[0].event_timestamps:
+                    ts = results[0].event_timestamps[0]
+                    dt = datetime.fromtimestamp(ts.seconds + ts.nanos / 1e9, tz=timezone.utc)
+                    features["_feature_timestamp"] = dt.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+            return features
         except Exception:
             logger.exception("Failed to fetch online features for msno=%s", msno)
             return {}
@@ -173,6 +184,7 @@ class PredictionService:
 
     def predict_single(self, msno: str) -> dict:
         features = self._get_features(msno)
+        feature_timestamp = features.pop("_feature_timestamp", None)
         feature_values = {k: v for k, v in features.items() if k != "msno"}
         member_found = bool(feature_values) and any(v is not None for v in feature_values.values())
 
@@ -187,6 +199,7 @@ class PredictionService:
             "is_churn": is_churn,
             "member_found": member_found,
             "reasons": reasons,
+            "feature_timestamp": feature_timestamp,
         }
 
     def _predict_single_fast(self, msno: str) -> dict:
