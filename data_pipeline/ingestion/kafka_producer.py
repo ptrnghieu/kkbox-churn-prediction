@@ -18,10 +18,11 @@ Bronze files streamed:
 from __future__ import annotations
 
 import argparse
-import io
+import gc
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import date, datetime
 
@@ -46,12 +47,23 @@ BRONZE_PREFIX = "bronze/raw"
 USER_LOGS_V2 = f"{BRONZE_PREFIX}/user_logs_v2.csv"
 TRANSACTIONS_V2 = f"{BRONZE_PREFIX}/transactions_v2.csv"
 
-# Date column values in Bronze are INTEGER yyyyMMdd
 DATE_FORMAT = "%Y%m%d"
-
-# Stream from 2017-03-01: first date where both user_logs AND transactions
-# are available. Jan-Feb 2017 has transactions only (user_logs_v2 starts March).
 STREAM_START_DATE = date(2017, 3, 1)
+
+# Optimized dtypes — reduces user_logs RAM from ~4 GB to ~2 GB
+_UL_DTYPES = {
+    "num_25":    "int32",
+    "num_50":    "int32",
+    "num_75":    "int32",
+    "num_985":   "int32",
+    "num_100":   "int32",
+    "num_unq":   "int32",
+    "total_secs": "float32",
+}
+_TX_DTYPES = {
+    "actual_amount_paid": "float32",
+    "plan_list_price":    "float32",
+}
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -68,13 +80,16 @@ def _serialize(value: dict) -> bytes:
 
 # ── GCS helpers ───────────────────────────────────────────────────────────────
 
-def _download_csv(client: gcs.Client, blob_path: str) -> pd.DataFrame:
-    log.info("Downloading gs://%s/%s ...", GCS_BUCKET, blob_path)
+def _download_to_disk(client: gcs.Client, blob_path: str) -> str:
+    """Stream blob to a temp file on disk — avoids holding raw bytes in RAM."""
+    log.info("Downloading gs://%s/%s to disk ...", GCS_BUCKET, blob_path)
     bucket = client.bucket(GCS_BUCKET)
-    data = bucket.blob(blob_path).download_as_bytes()
-    df = pd.read_csv(io.BytesIO(data))
-    log.info("Downloaded %s — shape: %s", blob_path.split("/")[-1], df.shape)
-    return df
+    fd, tmp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    bucket.blob(blob_path).download_to_filename(tmp_path)
+    size_mb = os.path.getsize(tmp_path) / 1024 / 1024
+    log.info("Downloaded %.0f MB → %s", size_mb, tmp_path)
+    return tmp_path
 
 
 # ── Producer helpers ──────────────────────────────────────────────────────────
@@ -98,81 +113,95 @@ def _send(producer: KafkaProducer, topic: str, key: str, record: dict) -> None:
 # ── Replay logic ──────────────────────────────────────────────────────────────
 
 def replay(speed: float, dry_run: bool) -> None:
-    """
-    Main replay loop — process one day at a time in chronological order.
-
-    Args:
-        speed:   Seconds to sleep between days. 0 = full speed.
-        dry_run: Log messages without sending to Kafka.
-    """
     gcs_client = gcs.Client(project=GCP_PROJECT_ID)
 
-    # Load both files upfront (1.3 GB + 110 MB)
-    user_logs = _download_csv(gcs_client, USER_LOGS_V2)
-    transactions = _download_csv(gcs_client, TRANSACTIONS_V2)
+    # Download to temp disk files — avoids keeping 1.3 GB in RAM as bytes
+    ul_path = _download_to_disk(gcs_client, USER_LOGS_V2)
+    tx_path = _download_to_disk(gcs_client, TRANSACTIONS_V2)
 
-    # Parse date columns (INTEGER yyyyMMdd → date)
-    user_logs["date"] = pd.to_datetime(user_logs["date"].astype(str), format=DATE_FORMAT).dt.date
-    transactions["transaction_date"] = pd.to_datetime(
-        transactions["transaction_date"].astype(str), format=DATE_FORMAT
-    ).dt.date
+    try:
+        # ── Load with memory-optimised dtypes ──────────────────────────────
+        log.info("Loading user_logs from disk (dtype-optimised) ...")
+        user_logs = pd.read_csv(ul_path, dtype=_UL_DTYPES)
+        user_logs["date"] = pd.to_datetime(
+            user_logs["date"].astype(str), format=DATE_FORMAT
+        ).dt.date
+        user_logs = user_logs[user_logs["date"] >= STREAM_START_DATE]
 
-    # Filter to post-training data only (transactions_v2 contains pre-2017 history too)
-    transactions = transactions[transactions["transaction_date"] >= STREAM_START_DATE]
-    user_logs = user_logs[user_logs["date"] >= STREAM_START_DATE]
-    log.info(
-        "After filter (>= %s): user_logs=%d rows, transactions=%d rows",
-        STREAM_START_DATE, len(user_logs), len(transactions),
-    )
+        log.info("Loading transactions from disk (dtype-optimised) ...")
+        transactions = pd.read_csv(tx_path, dtype=_TX_DTYPES)
+        transactions["transaction_date"] = pd.to_datetime(
+            transactions["transaction_date"].astype(str), format=DATE_FORMAT
+        ).dt.date
+        transactions = transactions[transactions["transaction_date"] >= STREAM_START_DATE]
 
+        log.info(
+            "After filter (>= %s): user_logs=%d rows, transactions=%d rows",
+            STREAM_START_DATE, len(user_logs), len(transactions),
+        )
 
-    # Build per-date groups
-    logs_by_date = dict(tuple(user_logs.groupby("date")))
-    txn_by_date = dict(tuple(transactions.groupby("transaction_date")))
+        # ── Build date-keyed dicts, then free the raw DataFrames ───────────
+        log.info("Grouping by date ...")
+        logs_by_date = {d: grp for d, grp in user_logs.groupby("date")}
+        del user_logs
+        gc.collect()
 
-    all_dates = sorted(set(logs_by_date) | set(txn_by_date))
-    log.info("Dates to replay: %d  (%s → %s)", len(all_dates), all_dates[0], all_dates[-1])
+        txns_by_date = {d: grp for d, grp in transactions.groupby("transaction_date")}
+        del transactions
+        gc.collect()
 
-    producer = None if dry_run else _make_producer()
+        all_dates = sorted(set(logs_by_date) | set(txns_by_date))
+        log.info(
+            "Dates to replay: %d  (%s → %s)",
+            len(all_dates), all_dates[0], all_dates[-1],
+        )
 
-    total_logs = 0
-    total_txn = 0
+        producer = None if dry_run else _make_producer()
 
-    for current_date in all_dates:
-        log.info("--- %s ---", current_date)
+        total_logs = 0
+        total_txn = 0
 
-        # user_logs
-        if current_date in logs_by_date:
-            records = logs_by_date[current_date].to_dict(orient="records")
-            for record in records:
-                record["date"] = current_date.isoformat()
-                if not dry_run:
-                    _send(producer, TOPIC_USER_LOGS, record.get("msno"), record)
-            total_logs += len(records)
-            log.info("  user_logs:    %d", len(records))
+        for current_date in all_dates:
+            log.info("--- %s ---", current_date)
 
-        # transactions
-        if current_date in txn_by_date:
-            records = txn_by_date[current_date].to_dict(orient="records")
-            for record in records:
-                record["transaction_date"] = current_date.isoformat()
-                if not dry_run:
-                    _send(producer, TOPIC_TRANSACTIONS, record.get("msno"), record)
-            total_txn += len(records)
-            log.info("  transactions: %d", len(records))
+            # .pop() frees each date's DataFrame from memory after sending
+            if current_date in logs_by_date:
+                records = logs_by_date.pop(current_date).to_dict(orient="records")
+                for record in records:
+                    record["date"] = current_date.isoformat()
+                    if not dry_run:
+                        _send(producer, TOPIC_USER_LOGS, record.get("msno"), record)
+                total_logs += len(records)
+                log.info("  user_logs:    %d", len(records))
+
+            if current_date in txns_by_date:
+                records = txns_by_date.pop(current_date).to_dict(orient="records")
+                for record in records:
+                    record["transaction_date"] = current_date.isoformat()
+                    if not dry_run:
+                        _send(producer, TOPIC_TRANSACTIONS, record.get("msno"), record)
+                total_txn += len(records)
+                log.info("  transactions: %d", len(records))
+
+            if producer:
+                producer.flush()
+            if speed > 0:
+                time.sleep(speed)
 
         if producer:
             producer.flush()
-        if speed > 0:
-            time.sleep(speed)
+            producer.close()
 
-    if producer:
-        producer.flush()
-        producer.close()
+        log.info("=== Replay complete ===")
+        log.info("Total user_log records  : %d", total_logs)
+        log.info("Total transaction records: %d", total_txn)
 
-    log.info("=== Replay complete ===")
-    log.info("Total user_log records : %d", total_logs)
-    log.info("Total transaction records: %d", total_txn)
+    finally:
+        for p in [ul_path, tx_path]:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
