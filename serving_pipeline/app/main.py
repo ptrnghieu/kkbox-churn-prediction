@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
+import random
 from time import perf_counter
 
+import redis as redis_lib
 from fastapi import FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -9,6 +11,7 @@ from app.metrics import (
     HTTP_REQUESTS_IN_PROGRESS,
     HTTP_REQUESTS_TOTAL,
 )
+from app import stats_store
 from app.predict import router as predict_router
 
 app = FastAPI(
@@ -47,6 +50,40 @@ async def prometheus_http_middleware(request: Request, call_next):
 @app.get("/health", tags=["Health Check"])
 def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/stats", tags=["Monitoring"])
+def get_stats():
+    """Return cumulative prediction statistics since last server start."""
+    return stats_store.get()
+
+
+@app.get("/stats/churned", tags=["Monitoring"])
+def get_churned(limit: int = 500):
+    """Return list of members predicted to churn, sorted by probability desc."""
+    return {"churned": stats_store.get_churned(limit=limit)}
+
+
+@app.get("/sample", tags=["Utility"])
+def sample_msnos(n: int = 5):
+    """Return n random msno values that exist in the online feature store."""
+    import re
+    try:
+        r = redis_lib.Redis(host="10.80.68.19", port=6379, socket_timeout=3)
+        msnos = set()
+        attempts = 0
+        while len(msnos) < n and attempts < n * 10:
+            raw = r.randomkey()
+            attempts += 1
+            if raw is None:
+                break
+            # Extract base64-encoded msno (44 chars ending with =)
+            matches = re.findall(r'[A-Za-z0-9+/]{43}=', raw.decode("latin-1", errors="ignore"))
+            if matches:
+                msnos.add(matches[0])
+        return {"msnos": list(msnos)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Cannot reach feature store: {exc}")
 
 @app.get("/test_error", tags=["Testing"])
 def test_error():

@@ -4,7 +4,8 @@ from app.metrics import (
     PREDICTION_REQUESTS_TOTAL,
     observe_prediction_result,
 )
-from app.schemas import PredictRequest, PredictResponse
+from app.schemas import BatchPredictRequest, PredictRequest, PredictResponse
+from app import stats_store
 from service.prediction import PredictionService
 
 router = APIRouter()
@@ -21,23 +22,24 @@ def predict_churn(data: PredictRequest, service: PredictionService = Depends(get
         churn_probability=result["churn_probability"],
         is_churn=result["is_churn"],
     )
+    stats_store.record(result["msno"], result["churn_probability"], result["is_churn"], event_time=data.event_time)
     return PredictResponse(**result)
 
 @router.post("/batch", response_model=list[PredictResponse], tags=["Batch Prediction"])
 def batch_predict_churn(
-    data: list[PredictRequest], 
+    data: BatchPredictRequest,
     service: PredictionService = Depends(get_prediction_service)
 ):
     PREDICTION_REQUESTS_TOTAL.labels(endpoint="/predict/batch", kind="batch").inc()
-    BATCH_PREDICTION_SIZE.observe(len(data))
-    msnos = [item.msno for item in data]
-    results = service.predict_batch(msnos)
+    BATCH_PREDICTION_SIZE.observe(len(data.msno_list))
+    results = service.predict_batch(data.msno_list)
     for result in results:
         observe_prediction_result(
             endpoint="/predict/batch",
             churn_probability=result["churn_probability"],
             is_churn=result["is_churn"],
         )
+        stats_store.record(result["msno"], result["churn_probability"], result["is_churn"], event_time=data.event_time)
     return [PredictResponse(**res) for res in results]
 
 
