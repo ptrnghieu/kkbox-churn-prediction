@@ -243,6 +243,9 @@ def consume(bootstrap_servers: str, dry_run: bool,
     logs_by_date: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     txns_by_date: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     flushed_dates: set[str] = set()
+    # Track EOD receipt per topic — flush only when both are received
+    eod_logs: set[str] = set()
+    eod_txns: set[str] = set()
     current_date: str | None = None
 
     def flush(date: str) -> None:
@@ -268,11 +271,19 @@ def consume(bootstrap_servers: str, dry_run: bool,
             record = msg.value
             topic  = msg.topic
 
-            # End-of-day marker sent by producer after each day's data
+            # End-of-day marker sent by producer on BOTH topics after each day.
+            # Only flush when both markers are received — prevents flushing before
+            # all transactions are consumed (two topics are read interleaved).
             if record.get("_end_of_day"):
                 eod_date = record.get("date", "")[:10]
-                if eod_date and eod_date not in flushed_dates:
-                    flush(eod_date)
+                if eod_date:
+                    if topic == TOPIC_USER_LOGS:
+                        eod_logs.add(eod_date)
+                    else:
+                        eod_txns.add(eod_date)
+                    if eod_date in eod_logs and eod_date in eod_txns:
+                        if eod_date not in flushed_dates:
+                            flush(eod_date)
                 current_date = None
                 continue
 
