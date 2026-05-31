@@ -21,6 +21,8 @@ import argparse
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -248,23 +250,39 @@ def consume(bootstrap_servers: str, dry_run: bool,
     eod_txns: set[str] = set()
     current_date: str | None = None
 
+    # Background worker: runs BQ write + Feast materialize serially so the
+    # consumer loop is never blocked waiting for slow storage operations.
+    _bg_queue: queue.Queue = queue.Queue()
+
+    def _bg_worker() -> None:
+        while True:
+            item = _bg_queue.get()
+            if item is None:
+                break
+            date_str, rows = item
+            write_to_bq(bq, rows, dry_run)
+            materialize(date_str, dry_run)
+            _bg_queue.task_done()
+
+    _bg_thread = threading.Thread(target=_bg_worker, daemon=True)
+    _bg_thread.start()
+
     def flush(date: str) -> None:
         if date in flushed_dates:
             return
         all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
         log.info("Flushing date %s — logs: %d users, txns: %d users",
                  date, len(logs_by_date[date]), len(txns_by_date[date]))
-        # Notify UI FIRST so users appear immediately, before the slow
-        # BigQuery write + Feast materialize operations complete
+        # Notify UI immediately so users appear in dashboard without delay
         if notify_url:
             _notify(notify_url, date, all_msno)
         flushed_dates.add(date)
         rows = build_rows(date, logs_by_date[date], txns_by_date[date], members)
-        write_to_bq(bq, rows, dry_run)
-        materialize(date, dry_run)
-        # Free memory
+        # Free memory before handing rows to background thread
         del logs_by_date[date]
         del txns_by_date[date]
+        # BQ write + Feast materialize run in background — consumer loop continues immediately
+        _bg_queue.put((date, rows))
 
     try:
         for msg in consumer:
@@ -313,6 +331,10 @@ def consume(bootstrap_servers: str, dry_run: bool,
         # Flush remaining buffer
         if current_date and current_date not in flushed_dates:
             flush(current_date)
+        # Wait for background BQ/Feast work to finish, then stop worker
+        _bg_queue.join()
+        _bg_queue.put(None)
+        _bg_thread.join()
         consumer.close()
         log.info("Consumer closed")
 
