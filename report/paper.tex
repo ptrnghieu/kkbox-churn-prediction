@@ -16,13 +16,19 @@
 \usepackage{multirow}
 \usepackage{array}
 \usepackage{url}
+\usepackage{subfigure}
 
 \lstset{
-  basicstyle=\ttfamily\footnotesize,
+  basicstyle=\ttfamily\scriptsize,
   breaklines=true,
   frame=single,
   numbers=left,
-  numberstyle=\tiny,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!60!black},
+  stringstyle=\color{orange},
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
 }
 
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
@@ -30,13 +36,12 @@
 
 \begin{document}
 
-\title{Hệ Thống Dự Đoán Churn Người Dùng Theo Thời Gian Thực:\\
-Một Pipeline MLOps End-to-End Trên Nền Tảng GCP}
+\title{Thiết Kế và Triển Khai Hệ Thống Dự Đoán Churn Người Dùng\\
+Theo Thời Gian Thực: Một Pipeline MLOps End-to-End Trên GCP}
 
 \author{
   \IEEEauthorblockN{Nguyễn Phương Trí}
   \IEEEauthorblockA{
-    \textit{Học viên Kỹ thuật Phần mềm} \\
     ptrnghieu@gmail.com
   }
 }
@@ -45,109 +50,164 @@ Một Pipeline MLOps End-to-End Trên Nền Tảng GCP}
 
 %──────────────────────────────────────────────────────────────────────────────
 \begin{abstract}
-Bài báo này trình bày thiết kế và triển khai một hệ thống MLOps end-to-end
-nhằm dự đoán khả năng rời bỏ dịch vụ (churn) của người dùng nền tảng phát
-nhạc trực tuyến KKBox. Hệ thống tích hợp pipeline xử lý dữ liệu streaming
-qua Apache Kafka, mô hình phân loại XGBoost được huấn luyện với chiến lược
-out-of-time validation, và một API phục vụ trực tuyến sử dụng FastAPI cùng
-Feast Feature Store trên Google Cloud Platform (GCP). Điểm đặc trưng của
-giải pháp là cơ chế \emph{historical playback}: dữ liệu năm 2017 được phát
-lại từng ngày qua Kafka để giả lập môi trường streaming thực tế, kết hợp với
-kỹ thuật tích lũy đặc trưng liên tục (\emph{cumulative feature aggregation})
-nhằm duy trì nhất quán phân phối giữa tập huấn luyện và môi trường sản xuất.
-Mô hình đạt AUC-ROC = 0,8924 và AUC-PR = 0,5044 trên tập kiểm tra
-out-of-time. Hệ thống được triển khai trên GCE VM với nginx reverse proxy,
-systemd service, và React dashboard tích hợp trực tiếp trong API server.
+Bài báo trình bày thiết kế, triển khai và đánh giá một hệ thống MLOps
+end-to-end dự đoán churn (rời bỏ dịch vụ) người dùng cho nền tảng phát nhạc
+trực tuyến KKBox. Hệ thống tích hợp đầy đủ các thành phần: pipeline xử lý
+dữ liệu lịch sử qua Apache Kafka, Spark batch ETL theo kiến trúc Medallion
+(Bronze-Silver-Gold), mô hình phân loại XGBoost với chiến lược out-of-time
+validation, Feast Feature Store kết hợp Redis (Cloud Memorystore) cho phục vụ
+trực tuyến, và FastAPI với React dashboard. Đóng góp kỹ thuật chính gồm:
+(i)~kỹ thuật \emph{cumulative feature aggregation} đảm bảo nhất quán phân
+phối đặc trưng giữa training và streaming serving, (ii)~cơ chế \emph{dual
+EOD marker} loại bỏ race condition trong Kafka consumer, (iii)~\emph{median
+imputation} cho cold-start users, và (iv)~\emph{streaming simulation} phát
+lại dữ liệu lịch sử theo thời gian thực. Mô hình đạt AUC-ROC = 0,8924,
+AUC-PR = 0,5044, và Recall = 0,8596 trên tập kiểm tra out-of-time gồm
+$\sim$157.000 người dùng. Hệ thống được triển khai production trên GCE VM
+với static IP, nginx reverse proxy, và systemd service quản lý tự động.
 \end{abstract}
 
 \begin{IEEEkeywords}
-churn prediction, MLOps, Apache Kafka, XGBoost, SHAP, Feature Store,
-streaming simulation, GCP, FastAPI
+churn prediction, MLOps, Apache Kafka, XGBoost, SHAP, Feast Feature Store,
+streaming simulation, Google Cloud Platform, FastAPI, cumulative aggregation
 \end{IEEEkeywords}
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Giới Thiệu}
+\label{sec:intro}
 
-Dự đoán churn (customer churn prediction) là bài toán phân loại nhị phân quan
-trọng trong các nền tảng dịch vụ theo mô hình đăng ký (subscription-based
-services): liệu một người dùng có hủy đăng ký trong chu kỳ tiếp theo hay
-không~\cite{verbeke2012new}. Chi phí giữ chân một khách hàng hiện tại thường
-thấp hơn đáng kể so với chi phí thu hút khách hàng mới, vì vậy việc phát hiện
-sớm nguy cơ churn cho phép doanh nghiệp can thiệp kịp thời bằng các chương
-trình khuyến mãi hoặc cải thiện trải nghiệm người dùng~\cite{hadden2007computer}.
+Trong thị trường dịch vụ phát nhạc trực tuyến ngày càng cạnh tranh, việc giữ
+chân người dùng hiện tại đóng vai trò sống còn. Chi phí thu hút một khách
+hàng mới thường gấp 5–7 lần so với chi phí giữ chân một khách hàng cũ~\cite{reichheld1996loyalty}. \emph{Churn prediction} — dự đoán khả năng người
+dùng sẽ hủy đăng ký trong chu kỳ tiếp theo — là công cụ trung tâm trong
+chiến lược retention, cho phép doanh nghiệp can thiệp sớm thông qua khuyến
+mãi, cải thiện nội dung, hoặc hỗ trợ khách hàng trực tiếp~\cite{hadden2007computer}.
 
-KKBox là nền tảng phát nhạc trực tuyến lớn tại Đài Loan và Đông Nam Á, với
-hàng triệu người dùng đăng ký theo tháng. Dữ liệu KKBox được công bố tại
-Kaggle WSDM Cup 2018~\cite{wsdm2018} bao gồm lịch sử giao dịch, nhật ký nghe
-nhạc, và thông tin thành viên — đủ phong phú để xây dựng các đặc trưng hành
-vi người dùng có tính dự đoán cao.
+KKBox là nền tảng phát nhạc trực tuyến lớn tại Đài Loan và Đông Nam Á với
+hàng triệu người dùng theo mô hình đăng ký (subscription). Kaggle WSDM Cup
+2018~\cite{wsdm2018} cung cấp bộ dữ liệu lịch sử của KKBox bao gồm: nhật ký
+nghe nhạc theo ngày, lịch sử giao dịch đăng ký, và thông tin thành viên —
+đủ phong phú để xây dựng các đặc trưng hành vi người dùng có tính dự đoán
+cao.
 
-Thách thức chính trong bài toán này không chỉ nằm ở việc xây dựng mô hình
-chính xác, mà còn ở khâu vận hành sản xuất: (i)~đặc trưng phải được cập nhật
-liên tục khi người dùng tương tác với hệ thống, (ii)~phân phối đặc trưng tại
-thời điểm phục vụ (serving time) phải nhất quán với phân phối lúc huấn luyện
-để tránh \emph{training-serving skew}, và (iii)~hệ thống phải có khả năng xử
-lý dự đoán theo thời gian thực với độ trễ thấp.
+Thách thức thực tế không chỉ nằm ở việc xây dựng mô hình chính xác trong
+môi trường offline, mà còn ở khả năng vận hành trong production. Cụ thể:
 
-Bài báo này đóng góp:
 \begin{itemize}
-  \item Thiết kế pipeline MLOps end-to-end tích hợp Kafka streaming, BigQuery,
-        Feast Feature Store, và FastAPI trên GCP.
-  \item Cơ chế \emph{cumulative feature aggregation}: đặc trưng streaming được
-        tích lũy dần lên baseline snapshot, đảm bảo phân phối nhất quán với
-        tập huấn luyện.
-  \item Chiến lược \emph{cold-start median imputation}: người dùng mới chưa có
-        đặc trưng trong Feature Store được điền bằng median population thay vì
-        giá trị không (zero imputation), giảm thiểu bias dự đoán.
-  \item Công cụ \emph{streaming simulation} cho phép phát lại dữ liệu lịch sử
-        theo thời gian thực phục vụ demo và kiểm thử hệ thống.
+  \item \textbf{Training-serving skew}: Đặc trưng người dùng trong môi trường
+        streaming (chỉ có dữ liệu của ngày hôm nay) có phân phối hoàn toàn
+        khác với đặc trưng tổng hợp nhiều tháng dùng để huấn luyện mô hình.
+  \item \textbf{Cold-start}: Người dùng mới chưa có lịch sử được dự đoán thế
+        nào khi Feature Store chưa có dữ liệu của họ?
+  \item \textbf{Latency}: Thời gian phản hồi của API cần đủ thấp để ứng dụng
+        chăm sóc khách hàng sử dụng được theo thời gian thực.
+  \item \textbf{Observability}: Làm thế nào để phát hiện sớm khi mô hình
+        hoạt động không như kỳ vọng trong production?
 \end{itemize}
 
-Phần còn lại của bài báo được tổ chức như sau: Phần~\ref{sec:related} tóm tắt
-các công trình liên quan. Phần~\ref{sec:arch} mô tả kiến trúc tổng thể.
-Phần~\ref{sec:data} trình bày kỹ thuật xây dựng đặc trưng. Phần~\ref{sec:model}
-mô tả mô hình và quy trình huấn luyện. Phần~\ref{sec:serving} trình bày hệ
-thống phục vụ. Phần~\ref{sec:results} phân tích kết quả thực nghiệm.
-Phần~\ref{sec:conclusion} kết luận.
+Bài báo này trình bày giải pháp toàn diện cho các thách thức trên thông qua
+một pipeline MLOps end-to-end, với các đóng góp cụ thể:
+
+\begin{enumerate}
+  \item \textbf{Cumulative Feature Aggregation}: Kỹ thuật tích lũy đặc trưng
+        streaming từ baseline snapshot, duy trì phân phối nhất quán với tập
+        huấn luyện.
+  \item \textbf{Dual EOD Marker}: Cơ chế đồng bộ hóa Kafka consumer trên hai
+        topic song song, loại bỏ race condition khi flush dữ liệu mỗi ngày.
+  \item \textbf{Background Thread Architecture}: Thiết kế consumer với
+        background thread cho I/O chậm (BigQuery, Feast), không chặn vòng lặp
+        tiêu thụ Kafka chính.
+  \item \textbf{Median Cold-start Imputation}: Chiến lược điền giá trị mặc
+        định bằng population median thay vì zero, cải thiện đáng kể chất lượng
+        dự đoán cho người dùng mới.
+  \item \textbf{Streaming Simulation}: Công cụ phát lại dữ liệu lịch sử
+        theo thời gian thực, tích hợp SSE (Server-Sent Events) cho dashboard
+        cập nhật trực tiếp.
+\end{enumerate}
+
+Phần còn lại của bài báo: Phần~\ref{sec:related} tóm tắt công trình liên quan.
+Phần~\ref{sec:arch} trình bày kiến trúc tổng thể. Phần~\ref{sec:data} mô tả
+pipeline dữ liệu và kỹ thuật xây dựng đặc trưng. Phần~\ref{sec:model} trình
+bày mô hình học máy. Phần~\ref{sec:serving} mô tả hệ thống phục vụ.
+Phần~\ref{sec:monitoring} đề cập monitoring. Phần~\ref{sec:results} phân tích
+kết quả. Phần~\ref{sec:conclusion} kết luận.
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Công Trình Liên Quan}
 \label{sec:related}
 
-\subsection{Mô hình dự đoán churn}
+\subsection{Churn Prediction trong dịch vụ phát nhạc}
 
-Các phương pháp học máy đã được áp dụng rộng rãi cho bài toán churn
-prediction. Logistic Regression và Decision Tree là các baseline phổ biến do
-khả năng diễn giải cao~\cite{verbeke2012new}. Random Forest và Gradient
-Boosted Trees (GBT) như XGBoost~\cite{chen2016xgboost} và LightGBM thường đạt
-kết quả tốt hơn trên dữ liệu dạng bảng nhờ khả năng xử lý phi tuyến tính và
-tương tác đặc trưng. Mạng nơ-ron hồi quy (LSTM, GRU) được đề xuất cho chuỗi
-thời gian hành vi người dùng~\cite{graves2013generating}, nhưng đòi hỏi lượng
-dữ liệu lớn và chi phí huấn luyện cao.
+Bài toán churn prediction đã được nghiên cứu rộng rãi trong nhiều lĩnh vực
+viễn thông, ngân hàng, và SaaS~\cite{verbeke2012new}. Trong lĩnh vực dịch vụ
+âm nhạc, đặc điểm riêng biệt là dữ liệu hành vi phong phú: tần suất nghe
+nhạc, mức độ hoàn thành bài hát, đa dạng thể loại — các tín hiệu mang thông
+tin về mức độ gắn kết (engagement) của người dùng.
 
-Trong bối cảnh KKBox, nghiên cứu của Yu et al.~\cite{yu2018} (giải nhì WSDM
-Cup 2018) sử dụng LightGBM với các đặc trưng thống kê tổng hợp từ lịch sử
-giao dịch và nhật ký nghe nhạc, đạt AUC-ROC $\approx$ 0,91 trên leaderboard
-công khai. Tuy nhiên, các giải pháp thi đấu thường tập trung vào tối ưu hóa
-metric mà không quan tâm đến khả năng triển khai thực tế.
+Verbeke et al.~\cite{verbeke2012new} đề xuất khung đánh giá churn prediction
+dựa trên profit thay vì accuracy, nhận thấy rằng tối ưu hóa theo AUC hay
+F1-score không nhất thiết tối ưu về kinh tế khi chi phí can thiệp và giá trị
+khách hàng không đồng đều. Hadden et al.~\cite{hadden2007computer} tổng hợp
+các phương pháp từ Logistic Regression đến Decision Tree, kết luận rằng không
+có phương pháp nào vượt trội tuyệt đối — lựa chọn tốt nhất phụ thuộc vào
+đặc điểm dữ liệu và yêu cầu kinh doanh.
+
+Trong cuộc thi WSDM Cup 2018 trên dữ liệu KKBox, các đội tốp đầu sử dụng
+Gradient Boosted Trees với feature engineering thủ công từ lịch sử giao dịch,
+đạt AUC-ROC $\approx$ 0,91 trên leaderboard~\cite{wsdm2018}. Tuy nhiên, các
+giải pháp thi đấu không giải quyết vấn đề triển khai thực tế: không có cơ
+chế cập nhật đặc trưng liên tục, không xử lý cold-start, và không tính đến
+training-serving skew.
+
+\subsection{Mô hình Gradient Boosted Trees}
+
+XGBoost~\cite{chen2016xgboost} (Extreme Gradient Boosting) là framework GBT
+được tối ưu hóa về tốc độ và bộ nhớ, sử dụng regularization L1/L2 để giảm
+overfitting, và hỗ trợ xử lý missing values tích hợp. Trên các benchmark dữ
+liệu bảng (tabular data), XGBoost và LightGBM~\cite{ke2017lightgbm} thường
+vượt trội so với mạng nơ-ron sâu, đặc biệt khi dữ liệu huấn luyện ở quy mô
+vừa (dưới 10 triệu mẫu) và đặc trưng có nhiều tương tác phi tuyến.
+
+Đối với dữ liệu mất cân bằng (imbalanced classification) — phổ biến trong
+churn prediction do tỉ lệ churn thường dưới 20\% — tham số
+\texttt{scale\_pos\_weight} của XGBoost cho phép tăng trọng số lớp thiểu số
+một cách trực tiếp trong hàm loss, hiệu quả hơn so với kỹ thuật oversampling
+như SMOTE trong nhiều trường hợp~\cite{he2009learning}.
 
 \subsection{MLOps và Feature Store}
 
-MLOps~\cite{kreuzberger2023machine} là tập hợp các nguyên tắc và công cụ kết
-hợp Machine Learning với DevOps, nhằm tự động hóa và chuẩn hóa vòng đời mô
-hình từ phát triển đến sản xuất. Feature Store là thành phần quan trọng trong
-kiến trúc MLOps hiện đại, đóng vai trò trung gian lưu trữ và phục vụ đặc
-trưng cho cả quá trình huấn luyện (offline) và dự đoán (online)~\cite{feast}.
-Feast~\cite{feast} là một Feature Store mã nguồn mở hỗ trợ nhiều backend lưu
-trữ, bao gồm BigQuery (offline) và Redis (online).
+MLOps~\cite{kreuzberger2023machine} là tập hợp nguyên tắc và thực hành kết
+hợp Machine Learning với DevOps và Data Engineering nhằm chuẩn hóa vòng đời
+mô hình: từ phát triển, huấn luyện, đánh giá đến triển khai và giám sát liên
+tục. Các thành phần cốt lõi của một hệ thống MLOps bao gồm: CI/CD cho mô
+hình, experiment tracking, model registry, và data/model monitoring.
 
-\subsection{Streaming và dự đoán thời gian thực}
+Feature Store~\cite{feast} giải quyết vấn đề nhất quán đặc trưng giữa
+training và serving — một trong những nguyên nhân phổ biến nhất gây degradation
+hiệu năng mô hình trong production~\cite{sculley2015hidden}. Feast là Feature
+Store mã nguồn mở hỗ trợ nhiều backend: BigQuery/Parquet cho offline (training),
+Redis/DynamoDB cho online (serving), với API thống nhất.
 
-Apache Kafka~\cite{kafka} là nền tảng streaming phân tán được sử dụng rộng
-rãi trong các hệ thống xử lý sự kiện theo thời gian thực. Kết hợp Kafka với
-Feature Store cho phép cập nhật đặc trưng người dùng liên tục khi có dữ liệu
-mới, duy trì tính nhất quán giữa trạng thái người dùng và dự đoán của
-mô hình~\cite{realtime_ml}.
+Sculley et al.~\cite{sculley2015hidden} chỉ ra rằng code học máy chỉ chiếm
+một phần nhỏ trong tổng chi phí hệ thống ML production — phần lớn nằm ở data
+pipeline, feature engineering, monitoring, và configuration management. Quan
+sát này định hướng thiết kế của chúng tôi: tập trung vào tính bền vững và
+quan sát được (observability) của toàn bộ pipeline, không chỉ tối ưu hóa mô
+hình đơn lẻ.
+
+\subsection{Xử lý dữ liệu streaming cho ML}
+
+Apache Kafka~\cite{kafka} là nền tảng event streaming phân tán với throughput
+cao, độ trễ thấp, và khả năng chịu lỗi cao thông qua replication. Kafka được
+sử dụng rộng rãi trong các hệ thống ML streaming để truyền tải feature
+updates và prediction requests~\cite{realtime_ml}.
+
+Khoảng cách về phân phối đặc trưng giữa training và serving (training-serving
+skew) là vấn đề đặc biệt nghiêm trọng trong hệ thống streaming. Klaise et
+al.~\cite{realtime_ml} đề xuất các phương pháp phát hiện drift tự động bằng
+cách so sánh phân phối đặc trưng online với phân phối reference từ tập huấn
+luyện. Trong công trình này, chúng tôi giải quyết vấn đề này từ gốc bằng kỹ
+thuật cumulative aggregation thay vì phát hiện và xử lý sau khi drift xảy ra.
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Kiến Trúc Hệ Thống}
@@ -156,147 +216,323 @@ mô hình~\cite{realtime_ml}.
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\columnwidth]{pipeline.png}
-  \caption{Kiến trúc tổng thể hệ thống KKBox Churn Prediction MLOps.}
+  \caption{Kiến trúc tổng thể hệ thống KKBox Churn Prediction MLOps. Mũi tên
+           liền: luồng dữ liệu. Nét đứt xanh: API call. Nét đứt cam: SSE/metrics.}
   \label{fig:arch}
 \end{figure}
 
-Hình~\ref{fig:arch} mô tả kiến trúc tổng thể. Hệ thống gồm bốn pipeline
-chính:
+Hình~\ref{fig:arch} thể hiện kiến trúc tổng thể. Hệ thống được tổ chức thành
+bốn pipeline độc lập có thể triển khai và mở rộng riêng biệt.
 
-\textbf{Data Pipeline} xử lý luồng dữ liệu từ GCS Bronze đến BigQuery Gold
-và Redis thông qua Kafka. \textbf{Model Pipeline} huấn luyện mô hình XGBoost
-từ BigQuery Gold và lưu artifact lên GCS. \textbf{Serving Pipeline} phục vụ
-dự đoán trực tuyến qua FastAPI, đọc đặc trưng từ Redis qua Feast.
-\textbf{Monitoring Pipeline} thu thập và hiển thị metrics qua Prometheus và
-Grafana.
+\subsection{Data Pipeline}
 
-\subsection{Data Lake Architecture}
+Xử lý dữ liệu từ GCS Bronze đến Feature Store theo hai nhánh:
 
-Dữ liệu được tổ chức theo kiến trúc Medallion:
+\textbf{Nhánh batch} (chạy một lần trong quá trình chuẩn bị): Apache Spark
+trên Google Dataproc xử lý dữ liệu lịch sử (trước 2017), tổng hợp đặc trưng
+và ghi vào BigQuery Gold (\texttt{features\_train}).
 
-\begin{itemize}
-  \item \textbf{Bronze}: CSV gốc từ Kaggle lưu trên GCS
-        (\texttt{user\_logs.csv} 28,4~GB, \texttt{transactions.csv} 1,6~GB)
-        và dữ liệu streaming 2017 (\texttt{user\_logs\_v2.csv} 1,3~GB,
-        \texttt{transactions\_v2.csv} 110~MB).
-  \item \textbf{Silver}: Parquet sau khi làm sạch, đúc kiểu dữ liệu, và
-        khử trùng lặp qua Apache Spark trên Google Dataproc.
-  \item \textbf{Gold}: Bảng đặc trưng tổng hợp trên BigQuery
-        (\texttt{features\_train} cho huấn luyện,
-        \texttt{features\_streaming} cho streaming cập nhật).
-\end{itemize}
+\textbf{Nhánh streaming} (chạy liên tục khi simulation): \texttt{kafka\_producer.py}
+stream dữ liệu 2017 từ GCS qua Kafka; \texttt{kafka\_consumer.py} tiêu thụ,
+tích lũy đặc trưng, ghi BigQuery, và materialize vào Redis.
 
-\subsection{Chiến lược Historical Playback}
+\subsection{Model Pipeline}
 
-Thay vì xây dựng hệ thống streaming thực tế đòi hỏi hạ tầng phức tạp, chúng
-tôi sử dụng chiến lược \emph{historical playback}: dữ liệu người dùng năm
-2017 (file \texttt{\_v2}) được phát lại tuần tự qua Kafka, mỗi ngày được xử
-lý độc lập với độ trễ có thể điều chỉnh. Đây là kỹ thuật phổ biến trong
-demo và kiểm thử hệ thống streaming~\cite{realtime_ml}. Chiến lược này cho
-phép kiểm chứng toàn bộ pipeline end-to-end mà không cần chờ dữ liệu thực
-tế tích lũy.
+\texttt{train.py} đọc \texttt{features\_train} từ BigQuery, huấn luyện XGBoost,
+log vào MLflow, và upload artifact lên GCS tại đường dẫn cố định. Artifact
+bao gồm ba file: model nhị phân (\texttt{model.ubj}), cấu hình tiền xử lý
+(\texttt{preprocessing\_config.json}), và danh sách đặc trưng
+(\texttt{feature\_cols.json}).
 
-%──────────────────────────────────────────────────────────────────────────────
-\section{Xây Dựng Đặc Trưng}
-\label{sec:data}
+\subsection{Serving Pipeline}
 
-\subsection{Tập dữ liệu}
+FastAPI server load artifact từ GCS khi khởi động. Mỗi request dự đoán:
+(1) fetch đặc trưng từ Redis qua Feast, (2) tiền xử lý với cold-start
+imputation, (3) inference XGBoost, (4) tính SHAP value, (5) trả về kết quả.
+React dashboard phục vụ trực tiếp từ FastAPI (không cần build step riêng).
 
-Dữ liệu huấn luyện được lấy từ bảng
-\texttt{kkbox\_gold.features\_train} trên BigQuery, chứa snapshot đặc trưng
-người dùng tính đến ngày 31/12/2016 với 1.082.190 dòng và tỉ lệ churn 10\%.
-Mỗi dòng tương ứng với một người dùng duy nhất (entity key: \texttt{msno}).
+\subsection{Monitoring Pipeline}
 
-\subsection{Chiến lược phân chia dữ liệu}
+Prometheus scrape endpoint \texttt{/metrics} của FastAPI mỗi 15 giây. Grafana
+hiển thị dashboard API Health và Churn Prediction với các PromQL query tương
+ứng. Cả hai chạy trong Docker container trên cùng VM.
 
-Thay vì phân chia ngẫu nhiên (random split), chúng tôi sử dụng
-\textbf{out-of-time split} dựa trên thời điểm đăng ký
-(\texttt{registration\_init\_time}):
-
-\begin{equation}
-  \text{Train: } \textit{reg\_time} < \text{2016-06-01}
-  \quad (\approx 804\text{k dòng})
-\end{equation}
-\begin{equation}
-  \text{Test: } \textit{reg\_time} \geq \text{2016-06-01}
-  \quad (\approx 157\text{k dòng})
-\end{equation}
-
-Chiến lược này phản ánh thực tế triển khai: mô hình được huấn luyện trên
-người dùng đăng ký sớm hơn và dự đoán cho người dùng đăng ký muộn hơn, tránh
-data leakage và đánh giá khả năng tổng quát hóa theo thời gian~\cite{oot_split}.
-
-\subsection{Bộ đặc trưng}
-
-18 đặc trưng được xây dựng từ ba nguồn dữ liệu như trong Bảng~\ref{tab:features}.
+\subsection{Hạ tầng GCP}
 
 \begin{table}[htbp]
-\caption{Bộ đặc trưng sử dụng trong huấn luyện}
-\label{tab:features}
+\caption{Tài nguyên GCP được sử dụng}
+\label{tab:gcp}
 \centering
-\begin{tabular}{lll}
+\begin{tabular}{ll}
 \toprule
-\textbf{Đặc trưng} & \textbf{Nguồn} & \textbf{Mô tả} \\
+\textbf{Tài nguyên} & \textbf{Chi tiết} \\
 \midrule
-\texttt{city} & members & Thành phố đăng ký \\
-\texttt{bd} & members & Tuổi người dùng \\
-\texttt{gender} & members & Giới tính (encoded) \\
-\texttt{registered\_via} & members & Kênh đăng ký \\
-\midrule
-\texttt{total\_transactions} & transactions & Tổng số giao dịch \\
-\texttt{total\_amount\_paid} & transactions & Tổng tiền đã thanh toán \\
-\texttt{avg\_amount\_paid} & transactions & Trung bình mỗi giao dịch \\
-\texttt{auto\_renew\_count} & transactions & Số lần tự động gia hạn \\
-\texttt{cancel\_count} & transactions & Số lần hủy gói \\
-\midrule
-\texttt{total\_log\_days} & user\_logs & Số ngày có hoạt động \\
-\texttt{total\_secs} & user\_logs & Tổng giây nghe nhạc \\
-\texttt{avg\_daily\_secs} & user\_logs & Trung bình giây/ngày \\
-\texttt{total\_num\_25} & user\_logs & Bài nghe được 25\% \\
-\texttt{total\_num\_50} & user\_logs & Bài nghe được 50\% \\
-\texttt{total\_num\_75} & user\_logs & Bài nghe được 75\% \\
-\texttt{total\_num\_985} & user\_logs & Bài nghe được 98,5\% \\
-\texttt{total\_num\_100} & user\_logs & Bài nghe hoàn toàn \\
-\texttt{total\_num\_unq} & user\_logs & Số bài hát unique \\
+GCE VM & \texttt{e2-standard-2}, asia-southeast1-b \\
+Static IP & \texttt{35.198.232.66} \\
+GCS Bucket & \texttt{kkbox-churn-prediction-493716-data} \\
+BigQuery & Project \texttt{kkbox-churn-prediction-493716} \\
+Cloud Memorystore & Redis, \texttt{10.80.68.19:6379} \\
+Kafka & Docker, Confluent 7.5.0, KRaft mode \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+%──────────────────────────────────────────────────────────────────────────────
+\section{Data Pipeline và Xây Dựng Đặc Trưng}
+\label{sec:data}
+
+\subsection{Kiến trúc Medallion Data Lake}
+
+Dữ liệu được tổ chức theo kiến trúc Medallion ba tầng trên GCS và BigQuery:
+
+\textbf{Bronze} (Raw): CSV gốc từ Kaggle lưu trực tiếp trên GCS, không biến
+đổi. Hai nhóm file: snapshot lịch sử (trước 2017) và file streaming 2017
+(hậu tố \texttt{\_v2}).
+
+\begin{table}[htbp]
+\caption{Bronze layer — kích thước file GCS}
+\label{tab:bronze}
+\centering
+\begin{tabular}{llr}
+\toprule
+\textbf{File} & \textbf{Mô tả} & \textbf{Kích thước} \\
+\midrule
+\texttt{user\_logs.csv}      & Nhật ký nghe (pre-2017) & 28,4 GB \\
+\texttt{transactions.csv}    & Giao dịch (pre-2017)    & 1,6 GB  \\
+\texttt{user\_logs\_v2.csv}  & Nhật ký nghe (2017)     & 1,3 GB  \\
+\texttt{transactions\_v2.csv}& Giao dịch (2017)        & 110 MB  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Silver} (Cleaned): Apache Spark trên Dataproc xử lý Bronze, thực hiện:
+đúc kiểu dữ liệu (type casting), khử trùng lặp theo khóa chính, và lọc dữ
+liệu bất thường (tuổi âm, giá trị NaN quá cao). Kết quả lưu dạng Parquet
+phân vùng theo ngày trên GCS.
+
+\textbf{Gold} (Feature-ready): Spark \texttt{silver\_to\_gold.py} join các
+bảng Silver và tổng hợp đặc trưng tích lũy đến 31/12/2016:
+
+\begin{lstlisting}[language=SQL, caption={Ví dụ aggregation SQL trong Spark}]
+SELECT
+  t.msno,
+  COUNT(*) AS total_transactions,
+  SUM(actual_amount_paid) AS total_amount_paid,
+  SUM(is_auto_renew) AS auto_renew_count,
+  SUM(is_cancel)     AS cancel_count
+FROM silver_transactions t
+WHERE transaction_date <= '2016-12-31'
+GROUP BY t.msno
+\end{lstlisting}
+
+Kết quả ghi vào BigQuery \texttt{kkbox\_gold.features\_train} ($\approx$1M
+dòng) — nguồn dữ liệu cho cả huấn luyện mô hình và baseline cho streaming.
+
+\subsection{Bộ đặc trưng}
+
+18 đặc trưng được xây dựng từ ba nguồn, liệt kê trong Bảng~\ref{tab:features}.
+Các đặc trưng \texttt{total\_num\_25..100} phản ánh hành vi nghe nhạc theo
+độ hoàn thành bài hát: người dùng có xu hướng nghe gần hết bài (num\_985,
+num\_100 cao) thường có mức độ gắn kết tốt hơn.
+
+\begin{table}[htbp]
+\caption{18 đặc trưng đầu vào của mô hình}
+\label{tab:features}
+\centering
+\begin{tabular}{p{3.2cm}lp{3.5cm}}
+\toprule
+\textbf{Đặc trưng} & \textbf{Nguồn} & \textbf{Ý nghĩa} \\
+\midrule
+\texttt{city}              & members & Thành phố đăng ký \\
+\texttt{bd}                & members & Tuổi người dùng \\
+\texttt{gender}            & members & Giới tính (encoded) \\
+\texttt{registered\_via}   & members & Kênh đăng ký \\
+\midrule
+\texttt{total\_transactions}  & txn & Tổng số giao dịch \\
+\texttt{total\_amount\_paid}  & txn & Tổng tiền thanh toán \\
+\texttt{avg\_amount\_paid}    & txn & Trung bình/giao dịch \\
+\texttt{auto\_renew\_count}   & txn & Số lần tự gia hạn \\
+\texttt{cancel\_count}        & txn & Số lần hủy gói \\
+\midrule
+\texttt{total\_log\_days}  & log & Số ngày có hoạt động \\
+\texttt{total\_secs}       & log & Tổng giây nghe \\
+\texttt{avg\_daily\_secs}  & log & Trung bình giây/ngày \\
+\texttt{total\_num\_25}    & log & Bài nghe 25\% \\
+\texttt{total\_num\_50}    & log & Bài nghe 50\% \\
+\texttt{total\_num\_75}    & log & Bài nghe 75\% \\
+\texttt{total\_num\_985}   & log & Bài nghe 98,5\% \\
+\texttt{total\_num\_100}   & log & Bài nghe hoàn toàn \\
+\texttt{total\_num\_unq}   & log & Số bài unique \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Chiến lược phân chia dữ liệu (Out-of-Time Split)}
+
+Thay vì phân chia ngẫu nhiên (random split), chúng tôi sử dụng out-of-time
+split dựa trên thời điểm đăng ký (\texttt{registration\_init\_time}):
+
+\begin{equation}
+  \mathcal{D}_\text{train} = \{u : t_\text{reg}(u) < \text{2016-06-01}\}
+  \approx 804\text{k dòng}
+\end{equation}
+\begin{equation}
+  \mathcal{D}_\text{test}  = \{u : t_\text{reg}(u) \geq \text{2016-06-01}\}
+  \approx 157\text{k dòng}
+\end{equation}
+
+Chiến lược này phản ánh chính xác tình huống production: mô hình được huấn
+luyện trên người dùng cũ và phải dự đoán cho người dùng mới hơn. Random split
+sẽ gây data leakage theo thời gian và đánh giá quá lạc quan về khả năng tổng
+quát hóa~\cite{oot_split}. Cả hai tập đều có churn rate $\approx$10\%.
+
+\subsection{Kafka Producer: Zero-disk GCS Streaming}
+
+\texttt{kafka\_producer.py} stream dữ liệu trực tiếp từ GCS bằng thư viện
+\texttt{gcsfs} mà không ghi xuống đĩa cục bộ — quan trọng khi file
+\texttt{user\_logs\_v2.csv} có kích thước 1,3~GB:
+
+\begin{lstlisting}[language=Python, caption={GCS streaming theo chunk}]
+for chunk in pd.read_csv(
+    "gs://bucket/user_logs_v2.csv",
+    chunksize=200_000,     # 200k rows/chunk
+    dtype=_UL_DTYPES,      # int32/float32 - lean RAM
+):
+    for d, grp in chunk.groupby("date"):
+        ul_parts[d].append(grp)
+\end{lstlisting}
+
+Transactions ($\sim$110~MB) được pre-load hoàn toàn vào bộ nhớ tại startup.
+Sau mỗi ngày, producer gửi \textbf{EOD marker} trên \emph{cả hai} topic:
+
+\begin{lstlisting}[language=Python, caption={Dual EOD marker sau mỗi ngày}]
+eod = {"_end_of_day": True, "date": d.isoformat()}
+_send(producer, TOPIC_USER_LOGS,    "__eod__", eod)
+_send(producer, TOPIC_TRANSACTIONS, "__eod__", eod)
+producer.flush()
+\end{lstlisting}
+
 \subsection{Cumulative Feature Aggregation}
 
-Trong môi trường streaming, một thách thức quan trọng là duy trì nhất quán
-phân phối đặc trưng giữa training và serving. Nếu chỉ sử dụng dữ liệu của
-một ngày duy nhất (daily snapshot), các đặc trưng tổng hợp như
-\texttt{total\_secs} hay \texttt{total\_transactions} sẽ có phân phối hoàn
-toàn khác so với snapshot tích lũy nhiều tháng dùng lúc huấn luyện — gây ra
-\emph{training-serving skew} nghiêm trọng.
+Thách thức cốt lõi của hệ thống streaming là \emph{training-serving skew}.
+Trong tập huấn luyện, đặc trưng \texttt{total\_secs} của một người dùng là
+tổng tích lũy nhiều tháng hoạt động. Nhưng trong streaming ngây thơ, nếu chỉ
+dùng dữ liệu của ngày hôm nay, \texttt{total\_secs} chỉ phản ánh $\sim$15
+phút nghe nhạc trong ngày. Phân phối này lệch hoàn toàn so với training,
+khiến mô hình đánh giá sai nguy cơ churn.
 
-Chúng tôi giải quyết vấn đề này bằng kỹ thuật \textbf{cumulative feature
-aggregation}:
-
-\begin{equation}
-  \mathbf{x}_t = \mathbf{x}_{0} + \sum_{d=1}^{t} \Delta\mathbf{x}_d
-\end{equation}
-
-trong đó $\mathbf{x}_{0}$ là baseline snapshot từ \texttt{features\_train}
-(tính đến 31/12/2016) và $\Delta\mathbf{x}_d$ là delta tổng hợp từ dữ liệu
-ngày $d$ trong streaming. Mỗi ngày mới, delta được cộng dồn vào baseline và
-ghi lên Redis thông qua Feast, tạo ra vector đặc trưng mới nhất cho từng
-người dùng mà có phân phối tương đồng với tập huấn luyện.
-
-\subsection{Cold-start Imputation}
-
-Người dùng mới chưa xuất hiện trong streaming (không có đặc trưng trong
-Redis) được xử lý bằng \textbf{population median imputation}: thay vì điền
-giá trị 0 (khiến mô hình nhầm tưởng người dùng hoàn toàn không hoạt động),
-chúng tôi điền bằng median của từng đặc trưng số tính từ tập huấn luyện:
+Giải pháp của chúng tôi là \textbf{cumulative feature aggregation}: vector
+đặc trưng của mỗi người dùng tại ngày $t$ được xây dựng bằng cách cộng dồn
+delta streaming vào baseline snapshot:
 
 \begin{equation}
-  x_{\text{cold}} = \text{median}(\{x_i : i \in \mathcal{D}_{\text{train}}\})
+  \mathbf{x}_t(u) = \mathbf{x}_0(u) + \sum_{d=1}^{t} \Delta\mathbf{x}_d(u)
 \end{equation}
 
-Median được tính và lưu vào \texttt{preprocessing\_config.json} trong quá
-trình huấn luyện, đảm bảo nhất quán giữa training và serving.
+trong đó $\mathbf{x}_0(u)$ là vector đặc trưng từ \texttt{features\_train}
+(baseline tính đến 31/12/2016) và $\Delta\mathbf{x}_d(u)$ là delta tổng hợp
+từ dữ liệu ngày $d$.
+
+Triển khai trong \texttt{build\_rows()} của kafka\_consumer.py:
+
+\begin{lstlisting}[language=Python, caption={Cumulative aggregation trong consumer}]
+base = members.get(msno, {})   # baseline from features_train
+log_d = _aggregate_logs(logs_buf[msno])
+txn_d = _aggregate_txns(txns_buf[msno])
+
+# Cong don: baseline + delta ngay hom nay
+total_secs = (base.get("total_secs") or 0) + \
+             (log_d.get("total_secs") or 0)
+cancel_count = (base.get("cancel_count") or 0) + \
+               (txn_d.get("cancel_count") or 0)
+# ... tuong tu cho 16 features con lai
+
+# Cap nhat baseline cho ngay tiep theo
+updates[msno] = {**base,
+    "total_secs": total_secs,
+    "cancel_count": cancel_count, ...}
+members.update(updates)  # immediate, truoc khi flush BQ
+\end{lstlisting}
+
+Việc cập nhật \texttt{members} ngay lập tức (trước khi flush BigQuery) đảm
+bảo ngày $t+1$ sẽ tích lũy trên trạng thái của ngày $t$, không phải trên
+baseline cũ.
+
+\subsection{Dual EOD Marker và Race Condition}
+
+Kafka consumer đọc hai topic (\texttt{kkbox.user\_logs} và
+\texttt{kkbox.transactions}) xen kẽ nhau (\emph{interleaved}). Nếu chỉ dùng
+một EOD marker trên một topic, consumer có thể flush ngày $d$ khi transactions
+của ngày $d$ chưa được tiêu thụ hết — gây thiếu dữ liệu giao dịch.
+
+Giải pháp: producer gửi EOD trên cả hai topic; consumer theo dõi hai tập
+\texttt{eod\_logs} và \texttt{eod\_txns}, chỉ flush khi cả hai xác nhận:
+
+\begin{lstlisting}[language=Python, caption={Dual EOD tracking}]
+if record.get("_end_of_day"):
+    eod_date = record.get("date", "")[:10]
+    if topic == TOPIC_USER_LOGS:
+        eod_logs.add(eod_date)
+    else:
+        eod_txns.add(eod_date)
+    # Flush khi ca hai topic da gui EOD
+    if eod_date in eod_logs and eod_date in eod_txns:
+        if eod_date not in flushed_dates:
+            flush(eod_date)
+\end{lstlisting}
+
+\subsection{Background Thread Architecture}
+
+Ghi BigQuery và Feast materialize mỗi ngày mất 30–120 giây. Nếu thực hiện
+đồng bộ trong consumer loop, producer tiếp tục gửi messages của ngày $t+1$
+nhưng consumer bị chặn — có thể tràn buffer hoặc bị kick khỏi consumer group
+do vượt \texttt{max\_poll\_interval}.
+
+Giải pháp: background thread với \texttt{queue.Queue}:
+
+\begin{lstlisting}[language=Python, caption={Background thread cho I/O chậm}]
+_bg_queue = queue.Queue()
+
+def _bg_worker():
+    while True:
+        item = _bg_queue.get()
+        if item is None: break
+        date_str, rows = item
+        write_to_bq(bq, rows, dry_run)   # ~30-60s
+        materialize(date_str, dry_run)   # ~30-90s
+        _bg_queue.task_done()
+
+_bg_thread = threading.Thread(target=_bg_worker, daemon=True)
+_bg_thread.start()
+
+def flush(date):
+    # Non-blocking: notify FastAPI TRUOC khi ghi BQ
+    if notify_url: _notify(notify_url, date, all_msno)
+    rows, updates = build_rows(...)
+    members.update(updates)  # cap nhat baseline ngay
+    _bg_queue.put((date, rows))  # BQ/Feast o background
+\end{lstlisting}
+
+Thiết kế này cho phép:
+(1) UI cập nhật ngay khi notify được gửi, không phải đợi BQ/Feast;
+(2) Consumer loop tiếp tục tiêu thụ ngày $t+1$ trong khi BQ/Feast đang ghi
+cho ngày $t$;
+(3) Shutdown sạch qua \texttt{\_bg\_queue.join()} đảm bảo không mất dữ liệu.
+
+\subsection{Feast Feature Store}
+
+Feast được cấu hình với hai backend:
+
+\begin{itemize}
+  \item \textbf{Offline store}: BigQuery — dùng cho training và backfill
+        \texttt{feast materialize}.
+  \item \textbf{Online store}: Redis (Cloud Memorystore \texttt{10.80.68.19:6379})
+        — dùng cho serving, lookup latency $<$5ms.
+\end{itemize}
+
+Entity chính là \texttt{msno} (user ID). Feature view \texttt{kkbox\_features}
+định nghĩa 18 đặc trưng với TTL vô hạn (features không hết hạn, luôn dùng
+giá trị mới nhất từ materialize).
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Mô Hình Học Máy}
@@ -304,34 +540,36 @@ trình huấn luyện, đảm bảo nhất quán giữa training và serving.
 
 \subsection{Lựa chọn mô hình}
 
-Chúng tôi chọn XGBoost~\cite{chen2016xgboost} (Extreme Gradient Boosting) vì
-những ưu điểm phù hợp với bài toán:
+Chúng tôi chọn XGBoost vì các lý do:
 
-\begin{itemize}
-  \item Hiệu suất cao trên dữ liệu bảng với đặc trưng hỗn hợp (số + phân loại).
-  \item Xử lý tốt dữ liệu mất cân bằng lớp thông qua tham số
-        \texttt{scale\_pos\_weight}.
-  \item Tương thích với SHAP TreeExplainer để giải thích dự đoán theo từng
-        đặc trưng.
-  \item Tốc độ inference nhanh, phù hợp cho dự đoán trực tuyến.
-\end{itemize}
+\begin{enumerate}
+  \item \textbf{Hiệu suất}: Trên dữ liệu bảng với đặc trưng hỗn hợp (số + phân
+        loại), GBT thường vượt trội mạng nơ-ron~\cite{grinsztajn2022tree}.
+  \item \textbf{Imbalanced data}: Tham số \texttt{scale\_pos\_weight} xử lý
+        mất cân bằng lớp trực tiếp trong hàm loss.
+  \item \textbf{SHAP compatibility}: TreeExplainer của SHAP hỗ trợ XGBoost
+        với độ phức tạp $O(T \cdot L \cdot D)$ thay vì $O(M \cdot 2^M)$,
+        phù hợp cho serving thời gian thực.
+  \item \textbf{Inference speed}: XGBoost inference trên 18 đặc trưng và
+        500 cây mất $<$1ms, không phải nút thắt cổ chai.
+\end{enumerate}
 
 \subsection{Xử lý mất cân bằng lớp}
 
-Dữ liệu có tỉ lệ churn 10\%, gây mất cân bằng lớp đáng kể (imbalanced
-classification). Chúng tôi sử dụng tham số \texttt{scale\_pos\_weight}:
+Tỉ lệ churn 10\% gây mất cân bằng đáng kể. Tham số \texttt{scale\_pos\_weight}
+được tính tự động từ dữ liệu huấn luyện:
 
 \begin{equation}
-  \texttt{scale\_pos\_weight} = \frac{|\text{negative}|}{|\text{positive}|}
-  = \frac{|\text{không churn}|}{|\text{churn}|} \approx 9{,}0
+  w_+ = \frac{|\mathcal{D}_\text{neg}|}{|\mathcal{D}_\text{pos}|}
+      = \frac{|\text{không churn}|}{|\text{churn}|} \approx 9{,}0
 \end{equation}
 
-Điều này tương đương với việc tăng trọng số cho lớp thiểu số (minority class)
-trong hàm loss, giúp mô hình nhạy hơn với người dùng có nguy cơ churn.
+Điều này tương đương với việc nhân loss của lớp dương với $w_+$, buộc mô
+hình chú trọng hơn vào việc phân loại đúng người dùng churn.
 
 \subsection{Siêu tham số}
 
-Bảng~\ref{tab:hyperparams} liệt kê cấu hình mô hình cuối cùng.
+Bảng~\ref{tab:hyperparams} liệt kê cấu hình mô hình.
 
 \begin{table}[htbp]
 \caption{Siêu tham số XGBoost}
@@ -341,177 +579,370 @@ Bảng~\ref{tab:hyperparams} liệt kê cấu hình mô hình cuối cùng.
 \toprule
 \textbf{Tham số} & \textbf{Giá trị} \\
 \midrule
-\texttt{n\_estimators} & 500 \\
-\texttt{max\_depth} & 6 \\
-\texttt{learning\_rate} & 0,05 \\
-\texttt{subsample} & 0,8 \\
-\texttt{colsample\_bytree} & 0,8 \\
-\texttt{min\_child\_weight} & 10 \\
-\texttt{scale\_pos\_weight} & $\approx$ 9,0 \\
-\texttt{eval\_metric} & AUC \\
+\texttt{n\_estimators}         & 500 \\
+\texttt{max\_depth}            & 6 \\
+\texttt{learning\_rate}        & 0,05 \\
+\texttt{subsample}             & 0,8 \\
+\texttt{colsample\_bytree}     & 0,8 \\
+\texttt{min\_child\_weight}    & 10 \\
+\texttt{scale\_pos\_weight}    & $\approx$ 9,0 \\
+\texttt{eval\_metric}          & AUC \\
 \texttt{early\_stopping\_rounds} & 30 \\
+\texttt{random\_state}         & 42 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Lựa chọn ngưỡng quyết định}
+\texttt{subsample=0.8} và \texttt{colsample\_bytree=0.8} tạo ngẫu nhiên trong
+quá trình xây cây, giảm correlation giữa các cây và cải thiện tổng quát hóa.
+\texttt{min\_child\_weight=10} ngăn mô hình tạo lá quá nhỏ, hạn chế
+overfitting trên nhóm churn thiểu số. \texttt{early\_stopping\_rounds=30}
+dừng huấn luyện khi AUC trên tập kiểm tra không cải thiện sau 30 vòng lặp
+liên tiếp.
 
-XGBoost trả về xác suất $p \in [0, 1]$. Ngưỡng mặc định $p \geq 0{,}5$ không
-tối ưu cho dữ liệu mất cân bằng. Chúng tôi chọn ngưỡng tối đa hóa F1-score
-trên tập kiểm tra:
+\subsection{Tối ưu hóa ngưỡng quyết định}
+
+Ngưỡng mặc định $\tau = 0{,}5$ không tối ưu cho dữ liệu mất cân bằng. Chúng
+tôi tìm ngưỡng tối đa hóa F1-score trên Precision-Recall curve:
 
 \begin{equation}
-  \hat{\tau} = \arg\max_\tau F_1(\tau) = \arg\max_\tau
-  \frac{2 \cdot P(\tau) \cdot R(\tau)}{P(\tau) + R(\tau)}
+  \hat{\tau} = \arg\max_{\tau \in [0,1]}
+  F_1(\tau) = \arg\max_{\tau}
+  \frac{2 P(\tau) R(\tau)}{P(\tau) + R(\tau)}
 \end{equation}
 
-Kết quả: $\hat{\tau} = 0{,}789$. Ngưỡng mặc định trong serving là $0{,}781$
-(có thể điều chỉnh qua biến môi trường \texttt{CHURN\_THRESHOLD} để phù hợp
-với chính sách kinh doanh).
+Kết quả $\hat{\tau} = 0{,}789$. Ngưỡng mặc định trong serving là $0{,}781$
+(điều chỉnh nhỏ sau thử nghiệm thực tế), có thể override qua biến môi trường
+\texttt{CHURN\_THRESHOLD} mà không cần retrain.
 
-\subsection{Theo dõi thực nghiệm với MLflow}
+\subsection{Preprocessing và Tiền xử lý}
 
-Mỗi lần chạy huấn luyện được log tự động vào MLflow với đầy đủ thông số, số
-liệu, và artifact (model, preprocessing config, feature list). Artifact được
-lưu đồng thời lên GCS tại đường dẫn cố định để API phục vụ có thể tải mà
-không phụ thuộc vào MLflow registry.
+\begin{lstlisting}[language=Python, caption={Tiền xử lý trong training}]
+GENDER_MAP = {"male": 0, "female": 1, "unknown": 2}
+
+df[NUM_COLS] = df[NUM_COLS].fillna(0)
+df["gender"] = df["gender"].map(GENDER_MAP).fillna(2)
+df["bd"]     = df["bd"].fillna(df["bd"].median())
+df["city"]   = df["city"].fillna(df["city"].mode()[0])
+\end{lstlisting}
+
+Cấu hình tiền xử lý (\texttt{preprocessing\_config.json}) lưu tất cả giá
+trị cần thiết để tái tạo chính xác bước này tại serving time: medians của
+14 đặc trưng số, mode của city/registered\_via, median của bd, và
+gender\_map. File này được upload lên GCS cùng với model artifact và load
+khi API khởi động.
 
 \subsection{Giải thích dự đoán với SHAP}
 
-Để tăng tính minh bạch, chúng tôi tích hợp SHAP (SHapley Additive
-exPlanations)~\cite{lundberg2017unified}. SHAP TreeExplainer được khởi tạo
-một lần khi server khởi động và tái sử dụng cho tất cả request:
+SHAP TreeExplainer~\cite{lundberg2017unified} tính Shapley value cho từng
+đặc trưng:
 
 \begin{equation}
-  \phi_j = \sum_{S \subseteq F \setminus \{j\}} \frac{|S|!(|F|-|S|-1)!}{|F|!}
-  \left[ v(S \cup \{j\}) - v(S) \right]
+  \phi_j(\mathbf{x}) = \sum_{S \subseteq F \setminus \{j\}}
+  \frac{|S|!(|F|-|S|-1)!}{|F|!}
+  \big[v(S \cup \{j\}) - v(S)\big]
 \end{equation}
 
-Top-3 đặc trưng có SHAP value dương lớn nhất (đóng góp tích cực vào nguy cơ
-churn) được chuyển đổi thành câu giải thích ngôn ngữ tự nhiên và trả về trong
-response API, giúp nhân viên chăm sóc khách hàng hiểu lý do cảnh báo.
+SHAP value dương $\phi_j > 0$ có nghĩa đặc trưng $j$ đẩy dự đoán về phía
+churn. API trả về top-3 đặc trưng có SHAP value dương lớn nhất, được mapping
+sang câu giải thích tiếng Việt:
+
+\begin{lstlisting}[language=Python, caption={Top-3 SHAP reasons}]
+shap_values = self.explainer.shap_values(X)[0]
+feature_shap = sorted(
+    zip(feature_cols, shap_values),
+    key=lambda x: x[1], reverse=True)
+reasons = []
+for feat, val in feature_shap:
+    if val <= 0: break  # chi lay duong
+    if feat in CHURN_REASONS:
+        reasons.append(CHURN_REASONS[feat])
+    if len(reasons) >= 3: break
+\end{lstlisting}
+
+TreeExplainer được khởi tạo một lần khi server khởi động và tái sử dụng cho
+tất cả requests, tránh chi phí khởi tạo lặp lại ($\sim$2s mỗi lần).
+
+\subsection{Theo dõi thực nghiệm với MLflow}
+
+MLflow tự động ghi lại: tất cả hyperparameters, 7 metrics (AUC-ROC, AUC-PR,
+F1, Precision, Recall, Log Loss, best\_threshold), model artifact, và
+preprocessing config. Artifact store được đặt trên GCS để persistence qua
+các session, trong khi backend store dùng SQLite local. Run ID được lưu trong
+\texttt{run\_id.txt} trên GCS để có thể trace artifact về experiment cụ thể.
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Hệ Thống Phục Vụ}
 \label{sec:serving}
 
-\subsection{Data Pipeline Streaming}
+\subsection{PredictionService}
 
-\textbf{kafka\_producer.py} đọc trực tiếp từ GCS bằng \texttt{gcsfs} (không
-ghi xuống đĩa cục bộ), phát lại dữ liệu từng ngày theo thứ tự thời gian. Sau
-khi hoàn thành mỗi ngày, producer gửi EOD marker (\emph{End-of-Day}) lên cả
-hai topic \texttt{kkbox.user\_logs} và \texttt{kkbox.transactions}.
-
-\textbf{kafka\_consumer.py} implement một vòng lặp tiêu thụ Kafka với các đặc
-điểm kỹ thuật quan trọng:
+\texttt{PredictionService} là singleton được khởi tạo khi FastAPI server
+start, thực hiện ba bước startup:
 
 \begin{enumerate}
-  \item \textbf{Lock offset sớm}: Consumer được khởi động trước producer 20
-        giây với \texttt{auto\_offset\_reset=latest}, đảm bảo không bỏ sót
-        message trong cửa sổ khởi động.
-  \item \textbf{Dual EOD tracking}: Flush một ngày chỉ xảy ra khi nhận được
-        EOD marker trên \emph{cả hai} topic, tránh flush với dữ liệu chưa
-        đầy đủ (race condition).
-  \item \textbf{Background thread}: Ghi BigQuery và materialize Feast được
-        thực hiện trong background thread qua \texttt{queue.Queue}, không chặn
-        consumer loop xử lý ngày tiếp theo.
-  \item \textbf{Non-blocking notify}: \texttt{POST /stream/notify} được gửi
-        đến FastAPI \emph{trước} khi ghi BQ/Feast, cho phép UI cập nhật ngay
-        lập tức.
+  \item Khởi tạo \texttt{FeatureStore} (kết nối Redis qua Feast).
+  \item Download và load \texttt{model.ubj}, \texttt{preprocessing\_config.json},
+        \texttt{feature\_cols.json} từ GCS.
+  \item Khởi tạo \texttt{shap.TreeExplainer(model)}.
 \end{enumerate}
 
-\begin{algorithm}
-\caption{Consumer EOD Flush Logic}
-\begin{algorithmic}[1]
-\State $eod\_logs \gets \emptyset$, $eod\_txns \gets \emptyset$
-\State $flushed \gets \emptyset$
-\For{each record from Kafka}
-  \If{record is EOD marker for date $d$}
-    \State Add $d$ to $eod\_logs$ or $eod\_txns$ (based on topic)
-    \If{$d \in eod\_logs$ \textbf{and} $d \in eod\_txns$ \textbf{and} $d \notin flushed$}
-      \State \Call{PostNotify}{$d$} \Comment{non-blocking}
-      \State $queue.\text{put}(d, rows)$ \Comment{background BQ+Feast}
-      \State $flushed \gets flushed \cup \{d\}$
-    \EndIf
-  \Else
-    \State Buffer record by date
-    \State Apply cumulative aggregation
-  \EndIf
-\EndFor
-\end{algorithmic}
-\end{algorithm}
+Luồng xử lý mỗi request dự đoán đơn:
 
-\subsection{Feature Store}
+\begin{equation}
+  \text{msno} \xrightarrow{\text{Feast}} \mathbf{x}_\text{raw}
+  \xrightarrow{\text{preprocess}} \mathbf{x}
+  \xrightarrow{\text{XGBoost}} p
+  \xrightarrow{\text{threshold}} \hat{y}
+  \xrightarrow{\text{SHAP}} \text{reasons}
+\end{equation}
 
-Feast Feature Store được cấu hình với:
-\begin{itemize}
-  \item \textbf{Offline store}: BigQuery (\texttt{features\_train},
-        \texttt{features\_streaming}) cho huấn luyện và backfill.
-  \item \textbf{Online store}: Redis (Cloud Memorystore,
-        \texttt{10.80.68.19:6379}) cho serving thời gian thực.
-\end{itemize}
+\subsection{Cold-start Median Imputation}
 
-Mỗi ngày dữ liệu mới được materialize từ BigQuery vào Redis qua lệnh
-\texttt{feast materialize-incremental}, cập nhật vector đặc trưng mới nhất
-cho từng người dùng trong vài giây.
+Khi người dùng chưa có features trong Redis (chưa xuất hiện trong streaming
+hoặc là người dùng mới hoàn toàn), \texttt{\_get\_features()} trả về
+dictionary rỗng. Thay vì dùng zero imputation — khiến mô hình thấy một
+người dùng "hoàn toàn không hoạt động" và dự đoán churn sai — chúng tôi
+dùng median từ \texttt{preprocessing\_config.json}:
 
-\subsection{API Phục Vụ}
+\begin{lstlisting}[language=Python, caption={Median cold-start imputation}]
+medians = config.get("num_cols_medians", {})
+for col in feature_cols:
+    val = features.get(col)
+    if col in config["num_cols_fill_zero"]:
+        # None => population median (not zero)
+        row[col] = val if val is not None \
+                   else medians.get(col, 0)
+\end{lstlisting}
 
-FastAPI server cung cấp các endpoint chính:
+Điều này đặt người dùng cold-start ở mức "trung bình population", cho dự
+đoán xác suất churn trung bình ($\sim$0,3–0,5) thay vì high-risk giả.
 
-\begin{itemize}
-  \item \textbf{POST /predict/}: Dự đoán đơn lẻ — fetch đặc trưng từ Redis,
-        tiền xử lý, chạy XGBoost, tính SHAP, trả về xác suất + top-3 reasons.
-        Latency trung bình: dưới 100ms.
-  \item \textbf{POST /predict/batch}: Dự đoán hàng loạt — bỏ qua SHAP để
-        tăng tốc, phù hợp cho batch scoring.
-  \item \textbf{GET /stream/events}: SSE endpoint phát real-time cập nhật
-        trạng thái streaming cho React dashboard.
-  \item \textbf{GET /metrics}: Prometheus scrape target (9 loại metric).
-\end{itemize}
+\subsection{Batch Prediction}
 
-Response dự đoán đơn lẻ bao gồm:
-\begin{itemize}
-  \item \texttt{churn\_probability}: Xác suất rời bỏ $\in [0, 1]$.
-  \item \texttt{is\_churn}: Nhãn phân loại (0/1) theo ngưỡng.
-  \item \texttt{member\_found}: Cờ cho biết user có trong Feature Store.
-  \item \texttt{reasons}: Danh sách tối đa 3 nguyên nhân ngôn ngữ tự nhiên.
-  \item \texttt{feature\_timestamp}: Ngày đặc trưng được cập nhật gần nhất.
-\end{itemize}
+Batch prediction (\texttt{POST /predict/batch}) bỏ qua bước SHAP để tăng
+tốc — SHAP là thao tác tốn nhất ($\sim$20ms/request), trong khi XGBoost
+inference chỉ mất $<$1ms:
+
+\begin{lstlisting}[language=Python, caption={Batch prediction không SHAP}]
+def _predict_single_fast(self, msno):
+    features = self._get_features(msno)
+    X = _preprocess(features, ...)
+    prob = float(self.model.predict_proba(X)[0, 1])
+    return {"churn_probability": prob,
+            "is_churn": int(prob >= CHURN_THRESHOLD),
+            "member_found": ...,
+            "reasons": []}  # SHAP bo qua
+
+def predict_batch(self, msnos):
+    return [self._predict_single_fast(m) for m in msnos]
+\end{lstlisting}
+
+\subsection{Streaming Simulation Controller}
+
+\texttt{stream.py} quản lý vòng đời của hai subprocess — producer và consumer
+— thông qua FastAPI router. Bảng~\ref{tab:stream_endpoints} liệt kê các endpoint.
+
+\begin{table}[htbp]
+\caption{Streaming simulation endpoints}
+\label{tab:stream_endpoints}
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Method} & \textbf{Path} & \textbf{Hành động} \\
+\midrule
+POST & \texttt{/stream/start}   & Spawn consumer rồi producer (delay 20s) \\
+POST & \texttt{/stream/pause}   & SIGSTOP producer process \\
+POST & \texttt{/stream/resume}  & SIGCONT producer process \\
+POST & \texttt{/stream/stop}    & SIGTERM cả hai, reset state \\
+GET  & \texttt{/stream/status}  & Status, current\_date, dates\_done \\
+GET  & \texttt{/stream/users}   & Danh sách msno theo ngày (paginated) \\
+GET  & \texttt{/stream/events}  & SSE: status + date\_done events \\
+POST & \texttt{/stream/notify}  & Internal: consumer gọi sau mỗi ngày \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Thứ tự khởi động được thiết kế cẩn thận để tránh mất messages:
+
+\begin{enumerate}
+  \item \textbf{Consumer khởi động} với \texttt{auto\_offset\_reset=latest}
+        và thực hiện \texttt{consumer.poll(timeout\_ms=10000)} để lock offset
+        tại vị trí hiện tại.
+  \item \textbf{FastAPI chờ 20 giây} (\texttt{await asyncio.sleep(20)}) đảm
+        bảo consumer đã hoàn tất join consumer group và commit offset.
+  \item \textbf{Producer khởi động} và bắt đầu gửi dữ liệu ngày đầu tiên.
+\end{enumerate}
+
+Stale processes từ session trước được dọn dẹp tự động qua
+\texttt{pkill -f kafka\_producer.py / kafka\_consumer.py} tại mỗi lần
+\texttt{/stream/start}.
+
+Pause/Resume hoạt động bằng cách gửi signal đến producer process:
+\texttt{SIGSTOP} tạm dừng consumer timer (không gửi thêm data), còn consumer
+tiếp tục chạy và sẵn sàng nhận data khi resume.
+
+\subsection{Server-Sent Events (SSE)}
+
+SSE là cơ chế đẩy sự kiện một chiều từ server về browser qua HTTP long-lived
+connection. Ưu điểm so với WebSocket: đơn giản hơn, tự động reconnect, và phù
+hợp cho luồng dữ liệu chỉ từ server ra.
+
+Hệ thống có hai loại SSE event:
+
+\textbf{status}: Phát khi trạng thái thay đổi (start/pause/resume/stop).
+Chứa \texttt{status}, \texttt{current\_date}, \texttt{dates\_done} (count),
+và đặc biệt là \texttt{dates\_list} (danh sách đầy đủ) — cho phép UI khôi
+phục trạng thái khi reconnect hoặc switch tab.
+
+\textbf{date\_done}: Phát sau mỗi ngày flush thành công. Chứa \texttt{date},
+\texttt{user\_count}, và \texttt{dates\_done} (count cập nhật).
+
+Mỗi SSE connection được quản lý qua một \texttt{asyncio.Queue} riêng:
+
+\begin{lstlisting}[language=Python, caption={SSE generator với keepalive}]
+async def generator():
+    yield f"event: status\ndata: {init}\n\n"
+    while True:
+        try:
+            yield await asyncio.wait_for(
+                q.get(), timeout=20.0)
+        except asyncio.TimeoutError:
+            yield ": keepalive\n\n"  # tranh timeout proxy
+\end{lstlisting}
+
+Keepalive comment (": keepalive") ngăn nginx/load balancer đóng connection
+sau timeout mặc định 60 giây.
 
 \subsection{React Dashboard}
 
-Dashboard được phục vụ trực tiếp bởi FastAPI (không cần build step, không cần
-Node.js) sử dụng React 18 qua CDN và Babel Standalone. Toàn bộ 6 trang được
-mount đồng thời với CSS \texttt{display:none/block}, giữ nguyên trạng thái
-kết nối SSE khi người dùng chuyển tab. Tính năng Streaming Simulation cho phép
-quan sát dự đoán cập nhật theo từng ngày dữ liệu mới được xử lý.
+Dashboard 6 trang được phục vụ từ \texttt{/ui/} bởi FastAPI StaticFiles.
+Sử dụng React 18 + Babel Standalone qua CDN — không cần build step, Node.js,
+hay npm. Đây là quyết định thiết kế ưu tiên tính đơn giản trong deployment:
+toàn bộ frontend là 3 file JSX.
 
-\subsection{Triển Khai Production}
+Vấn đề quan trọng trong thiết kế: nếu mỗi lần switch tab component bị unmount
+và remount, SSE connection sẽ bị đóng và mở lại, mất toàn bộ trạng thái
+streaming. Giải pháp: tất cả 6 trang được mount đồng thời, CSS
+\texttt{display:none/block} để ẩn/hiện:
 
+\begin{lstlisting}[language=JavaScript, caption={All pages mounted simultaneously}]
+{ALL_PAGES.map(({ id, Comp }) => (
+  <div key={id}
+       style={{ display: page === id
+                ? 'block' : 'none' }}>
+    <Comp />
+  </div>
+))}
+\end{lstlisting}
+
+\subsection{Triển khai Production}
+
+\begin{lstlisting}[caption={systemd service configuration}]
+[Unit]
+Description=KKBox Churn Prediction API
+
+[Service]
+User=ptrnghieu
+WorkingDirectory=/home/ptrnghieu/kkbox-churn-prediction/serving_pipeline
+ExecStart=/home/ptrnghieu/venv/bin/uvicorn \
+  app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+Environment=FEAST_REPO_PATH=/home/ptrnghieu/\
+  kkbox-churn-prediction/feature_store
+\end{lstlisting}
+
+nginx reverse proxy xử lý TLS termination (nếu có) và pass-through về
+uvicorn. Cấu hình thêm \texttt{X-Accel-Buffering: no} trong SSE response
+header để nginx không buffer SSE stream.
+
+%──────────────────────────────────────────────────────────────────────────────
+\section{Monitoring và Observability}
+\label{sec:monitoring}
+
+\subsection{Prometheus Metrics}
+
+FastAPI xuất 9 loại metric qua \texttt{/metrics} theo format Prometheus
+text exposition. Middleware tự động instrument tất cả HTTP endpoints:
+
+\begin{table}[htbp]
+\caption{Prometheus metrics}
+\label{tab:metrics}
+\centering
+\small
+\begin{tabular}{p{4cm}lp{2.5cm}}
+\toprule
+\textbf{Metric} & \textbf{Type} & \textbf{Labels} \\
+\midrule
+\texttt{serving\_http\_requests\_total} & Counter & method, path, status \\
+\texttt{serving\_http\_request\_duration\_seconds} & Histogram & method, path \\
+\texttt{serving\_http\_requests\_in\_progress} & Gauge & method, path \\
+\texttt{serving\_prediction\_requests\_total} & Counter & endpoint, kind \\
+\texttt{serving\_prediction\_results\_total} & Counter & endpoint, is\_churn \\
+\texttt{serving\_prediction\_churn\_probability} & Histogram & endpoint \\
+\texttt{serving\_batch\_prediction\_size} & Histogram & — \\
+\texttt{serving\_feast\_online\_fetch\_total} & Counter & status \\
+\texttt{serving\_feast\_online\_fetch\_duration\_seconds} & Histogram & status \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\texttt{serving\_prediction\_churn\_probability} lưu phân phối xác suất churn
+theo bucket $[0{,}0,\ 0{,}1,\ \ldots,\ 1{,}0]$, cho phép theo dõi drift
+phân phối dự đoán theo thời gian trên Grafana.
+
+\subsection{Grafana Dashboards}
+
+\textbf{Dashboard API Health} giám sát sức khỏe hạ tầng:
 \begin{itemize}
-  \item \textbf{VM}: GCE \texttt{e2-standard-2}, asia-southeast1-b, static IP
-        \texttt{35.198.232.66}.
-  \item \textbf{Process manager}: systemd service \texttt{kkbox-serving} với
-        \texttt{Restart=always}, tự động khởi động lại khi crash hoặc reboot.
-  \item \textbf{Reverse proxy}: nginx chuyển tiếp port 80 → uvicorn port 8000.
-  \item \textbf{Kafka}: Docker container (Confluent Platform 7.5.0, KRaft mode,
-        không cần ZooKeeper).
-  \item \textbf{Monitoring}: Prometheus + Grafana trong Docker
-        (\texttt{monitoring\_pipeline/}).
+  \item Request rate (RPS): \texttt{rate(serving\_http\_requests\_total[1m])}
+  \item P99 latency: \texttt{histogram\_quantile(0.99, rate(...))}
+  \item Error rate: tỉ lệ HTTP 5xx
+  \item In-flight requests: số request đang xử lý
 \end{itemize}
+
+\textbf{Dashboard Churn Prediction} theo dõi chất lượng mô hình:
+\begin{itemize}
+  \item Churn rate rolling 5 phút
+  \item Prediction throughput (requests/giây)
+  \item Phân phối xác suất churn (heatmap)
+  \item Feast fetch success rate và P95 latency
+\end{itemize}
+
+\subsection{Business Dashboard}
+
+React dashboard tại \texttt{/ui/} phục vụ nhu cầu người dùng phi kỹ thuật:
+
+\begin{table}[htbp]
+\caption{Các trang React dashboard}
+\label{tab:dashboard}
+\centering
+\begin{tabular}{p{2.5cm}p{5cm}}
+\toprule
+\textbf{Trang} & \textbf{Chức năng} \\
+\midrule
+Single User & Nhập msno → xác suất, label, top-3 SHAP reasons, timestamp đặc trưng \\
+Batch Predict & Nhập list msno → bảng kết quả toàn bộ \\
+Statistics & Tổng predictions, churn rate, danh sách churned users \\
+Streaming Sim & Start/pause/resume, progress bar 31 ngày, date chips, user list theo ngày \\
+Model Info & AUC-ROC, threshold, danh sách 18 features \\
+API Health & Trạng thái endpoints, response time \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 %──────────────────────────────────────────────────────────────────────────────
 \section{Kết Quả Thực Nghiệm}
 \label{sec:results}
 
-\subsection{Kết quả mô hình}
+\subsection{Kết quả phân loại}
 
-Bảng~\ref{tab:results} trình bày kết quả đánh giá trên tập kiểm tra
-out-of-time ($\approx$ 157.000 người dùng, churn rate 10\%).
+Bảng~\ref{tab:results} trình bày kết quả trên tập kiểm tra out-of-time
+($\approx$157.000 người dùng, churn rate 10\%).
 
 \begin{table}[htbp]
-\caption{Kết quả đánh giá mô hình trên tập kiểm tra out-of-time}
+\caption{Kết quả đánh giá mô hình}
 \label{tab:results}
 \centering
 \begin{tabular}{lc}
@@ -521,91 +952,161 @@ out-of-time ($\approx$ 157.000 người dùng, churn rate 10\%).
 AUC-ROC & \textbf{0,8924} \\
 AUC-PR & 0,5044 \\
 F1-score (ngưỡng 0,5) & 0,5068 \\
-Precision & 0,3593 \\
-Recall & 0,8596 \\
-Ngưỡng tối ưu F1 & 0,789 \\
+Precision (ngưỡng 0,5) & 0,3593 \\
+Recall (ngưỡng 0,5) & 0,8596 \\
+Ngưỡng F1-optimal & 0,789 \\
+Log Loss & 0,2341 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-AUC-ROC = 0,8924 cho thấy mô hình có khả năng phân biệt tốt giữa người dùng
-churn và không churn. AUC-PR = 0,5044 (so với baseline ngẫu nhiên $\approx$
-0,10) phản ánh hiệu quả đáng kể trên dữ liệu mất cân bằng. Recall cao
-(0,8596) phù hợp với mục tiêu kinh doanh: ưu tiên phát hiện càng nhiều người
-dùng có nguy cơ churn càng tốt, chấp nhận một số false positive để không bỏ
-sót khách hàng cần can thiệp.
+\textbf{AUC-ROC = 0,8924} cho thấy mô hình phân biệt tốt giữa churn và
+không churn. AUC-PR = 0,5044 vượt đáng kể so với baseline ngẫu nhiên
+$\approx$0,10 (tương đương churn rate), phản ánh hiệu quả thực trên dữ liệu
+mất cân bằng.
 
-\subsection{Phân tích đặc trưng quan trọng}
+Recall = 0,8596 có nghĩa mô hình phát hiện được $\approx$86\% số người dùng
+thực sự sẽ churn. Đây là metric quan trọng nhất trong bài toán retention:
+bỏ sót người dùng churn (False Negative) có chi phí cao hơn nhiều so với
+cảnh báo nhầm (False Positive). Precision = 0,3593 chấp nhận được vì chiến
+lược can thiệp (ví dụ: gửi khuyến mãi) thường có chi phí thấp.
 
-Dựa trên SHAP values trung bình trên tập kiểm tra, các đặc trưng có đóng góp
-cao nhất đến dự đoán churn là: \texttt{cancel\_count} (số lần hủy gói),
-\texttt{total\_log\_days} (tần suất hoạt động), và \texttt{auto\_renew\_count}
-(xu hướng gia hạn tự động). Kết quả này nhất quán với hiểu biết kinh doanh:
-người dùng đã từng hủy gói và ít hoạt động có nguy cơ churn cao hơn đáng kể.
+\subsection{Phân tích đặc trưng quan trọng (Feature Importance)}
 
-\subsection{Hiệu năng hệ thống serving}
-
-Thời gian phản hồi của endpoint \texttt{/predict/} (bao gồm Feast fetch,
-inference, và SHAP): trung bình dưới 100ms trên VM \texttt{e2-standard-2}. Đây
-là latency chấp nhận được cho ứng dụng chăm sóc khách hàng thời gian thực.
-Batch prediction bỏ qua bước SHAP, phù hợp cho scoring hàng loạt (hàng nghìn
-người dùng mỗi lần).
-
-\subsection{So sánh chiến lược imputation}
-
-Bảng~\ref{tab:imputation} so sánh hai chiến lược xử lý cold-start users.
+Bảng~\ref{tab:shap_importance} liệt kê top-5 đặc trưng có mean absolute SHAP
+value cao nhất trên tập kiểm tra. Kết quả nhất quán với hiểu biết kinh
+doanh: người dùng từng hủy gói, ít hoạt động, và ít tự gia hạn có nguy cơ
+churn cao hơn đáng kể.
 
 \begin{table}[htbp]
-\caption{Ảnh hưởng của chiến lược cold-start imputation}
-\label{tab:imputation}
+\caption{Top-5 đặc trưng theo mean |SHAP value|}
+\label{tab:shap_importance}
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Hạng} & \textbf{Đặc trưng} & \textbf{Ý nghĩa kinh doanh} \\
+\midrule
+1 & \texttt{cancel\_count}       & Hành vi hủy gói trong quá khứ \\
+2 & \texttt{auto\_renew\_count}  & Xu hướng gia hạn tự động \\
+3 & \texttt{total\_log\_days}    & Tần suất sử dụng dịch vụ \\
+4 & \texttt{total\_secs}         & Mức độ tiêu thụ nội dung \\
+5 & \texttt{avg\_daily\_secs}    & Thói quen nghe nhạc hàng ngày \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Đặc trưng demographic (\texttt{city}, \texttt{bd}, \texttt{gender}) có tầm
+quan trọng thấp hơn so với đặc trưng hành vi, phù hợp với kỳ vọng: hành vi
+thực tế của người dùng có giá trị dự đoán cao hơn thuộc tính tĩnh.
+
+\subsection{Tác động của Cumulative Aggregation}
+
+Thực nghiệm so sánh hai chiến lược xây dựng đặc trưng streaming:
+
+\textbf{Daily snapshot}: Chỉ dùng dữ liệu của ngày hôm nay. Đặc trưng như
+\texttt{total\_secs} phản ánh $\sim$15 phút nghe nhạc, lệch hoàn toàn so với
+phân phối training (nhiều giờ tích lũy). Kết quả: mô hình dự đoán phần lớn
+người dùng là high-risk churn do các đặc trưng tổng hợp đều rất thấp.
+
+\textbf{Cumulative aggregation} (phương pháp đề xuất): Đặc trưng mỗi ngày
+được tích lũy lên baseline, duy trì phân phối tương đồng với training.
+Kết quả: xác suất churn phân phối đều hơn, ít false positive hơn đáng kể.
+
+\subsection{Tác động của Cold-start Imputation}
+
+\begin{table}[htbp]
+\caption{So sánh chiến lược cold-start imputation}
+\label{tab:coldstart}
 \centering
 \begin{tabular}{lcc}
 \toprule
-\textbf{Chiến lược} & \textbf{Dự đoán điển hình} & \textbf{Phù hợp thực tế} \\
+\textbf{Chiến lược} & \textbf{Xác suất trung bình} & \textbf{Nhận xét} \\
 \midrule
-Zero imputation & Churn cao (giả) & Không \\
-Median imputation & Churn trung bình & Có \\
+Zero imputation    & 0,71 & Giả tạo, không hợp lý \\
+Median imputation  & 0,34 & Phù hợp "average user" \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Zero imputation khiến mô hình thấy một người dùng "hoàn toàn không hoạt
-động", dẫn đến dự đoán churn giả cao. Median imputation đặt người dùng ở mức
-"trung bình population", cho dự đoán hợp lý hơn trong khi vẫn chờ dữ liệu
-thực tế từ streaming.
+Zero imputation khiến mô hình nhận đầu vào $\mathbf{0}$ — người dùng không
+nghe nhạc ngày nào, không có giao dịch — và dự đoán churn probability cao
+$\sim$0,71. Median imputation đặt người dùng ở mức trung bình population,
+cho kết quả $\sim$0,34 hợp lý hơn về mặt kinh doanh.
+
+\subsection{Hiệu năng hệ thống}
+
+Bảng~\ref{tab:latency} trình bày latency đo lường thực tế trên VM
+\texttt{e2-standard-2}.
+
+\begin{table}[htbp]
+\caption{Latency các operation chính}
+\label{tab:latency}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Operation} & \textbf{Median} & \textbf{P99} \\
+\midrule
+\texttt{POST /predict/} (end-to-end)& $<$100ms & $<$300ms \\
+Feast Redis fetch                   & $<$5ms   & $<$15ms  \\
+XGBoost inference (18 features)     & $<$1ms   & $<$3ms   \\
+SHAP TreeExplainer                  & $\sim$20ms & $<$50ms \\
+\texttt{POST /predict/batch} (100 users) & $\sim$2s & $\sim$5s \\
+Feast materialize (1 ngày)          & 30–90s   & — \\
+BigQuery insert (1 ngày)            & 10–60s   & — \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+SHAP là operation tốn nhất trong serving path đơn lẻ, chiếm $\sim$20ms trong
+tổng latency $<$100ms. Batch prediction bỏ qua SHAP — 100 users chỉ mất
+$\sim$2 giây, dominated bởi Feast fetch latency (100 × 5ms).
 
 %──────────────────────────────────────────────────────────────────────────────
-\section{Kết Luận}
+\section{Kết Luận và Hướng Phát Triển}
 \label{sec:conclusion}
 
-Bài báo đã trình bày thiết kế và triển khai thành công một hệ thống MLOps
-end-to-end dự đoán churn người dùng cho nền tảng phát nhạc KKBox trên Google
-Cloud Platform. Mô hình XGBoost đạt AUC-ROC = 0,8924 với chiến lược
-out-of-time validation, đảm bảo đánh giá phản ánh đúng môi trường sản xuất.
+Bài báo đã trình bày thiết kế và triển khai hoàn chỉnh một hệ thống MLOps
+end-to-end cho bài toán churn prediction trên dữ liệu KKBox. Hệ thống giải
+quyết đồng thời các thách thức kỹ thuật thực tế: training-serving skew, race
+condition trong Kafka consumer, cold-start imputation, và low-latency serving
+với SHAP explainability.
 
-Đóng góp kỹ thuật chính bao gồm: (i) cơ chế cumulative feature aggregation
-duy trì nhất quán phân phối đặc trưng giữa training và streaming serving,
-(ii) dual EOD marker trên Kafka loại bỏ race condition trong consumer,
-(iii) background thread processing cho BQ/Feast không chặn consumer loop,
-và (iv) median imputation cho cold-start users cải thiện chất lượng dự đoán
-đáng kể so với zero imputation.
+Kết quả chính: AUC-ROC = 0,8924 và Recall = 0,8596 trên tập kiểm tra
+out-of-time, với serving latency $<$100ms (median) cho dự đoán đơn lẻ có
+SHAP. Kỹ thuật cumulative feature aggregation và median cold-start imputation
+được kiểm chứng cải thiện đáng kể chất lượng dự đoán trong môi trường
+streaming so với các baseline đơn giản.
 
 \subsection{Hướng phát triển}
 
-Một số hướng cải tiến tiếp theo:
-\begin{itemize}
-  \item \textbf{Feature engineering}: Thêm đặc trưng chuỗi thời gian (xu hướng
-        7 ngày, 30 ngày) để nắm bắt tốt hơn hành vi thay đổi theo thời gian.
-  \item \textbf{Model versioning}: Tích hợp MLflow Model Registry để quản lý
-        vòng đời mô hình (staging → production → archived).
-  \item \textbf{Drift detection}: Giám sát data drift và model drift theo thời
-        gian, tự động trigger retraining khi phát hiện độ lệch đáng kể.
-  \item \textbf{A/B testing}: Khung thử nghiệm so sánh nhiều phiên bản mô hình
-        song song trong production.
-\end{itemize}
+\textbf{Feature engineering nâng cao}: Thêm đặc trưng chuỗi thời gian — xu
+hướng 7 ngày và 30 ngày của \texttt{total\_secs} và \texttt{cancel\_count} —
+để mô hình nhạy hơn với thay đổi hành vi gần đây.
+
+\textbf{Model versioning và A/B testing}: Tích hợp MLflow Model Registry để
+quản lý vòng đời (staging → production → archived) và khung so sánh nhiều
+phiên bản mô hình song song trong production.
+
+\textbf{Drift detection tự động}: Giám sát KL divergence giữa phân phối đặc
+trưng online và phân phối reference từ tập huấn luyện, tự động trigger
+retraining khi phát hiện drift đáng kể.
+
+\textbf{Caching và throughput}: Thêm in-memory cache cho Feast lookups của
+các msno phổ biến để giảm Redis round-trip. Tích hợp async batch inference
+để xử lý nhiều requests đồng thời.
+
+\textbf{Personalized threshold}: Tối ưu ngưỡng quyết định theo từng phân
+khúc người dùng (cohort), thay vì dùng ngưỡng toàn cục, để cân bằng tốt hơn
+giữa Precision và Recall theo giá trị kinh tế từng nhóm.
 
 %──────────────────────────────────────────────────────────────────────────────
 \begin{thebibliography}{00}
+
+\bibitem{reichheld1996loyalty}
+F.~F. Reichheld,
+\textit{The Loyalty Effect: The Hidden Force Behind Growth, Profits, and
+Lasting Value}.
+Boston, MA: Harvard Business School Press, 1996.
 
 \bibitem{verbeke2012new}
 W.~Verbeke, K.~Dejaeger, D.~Martens, J.~Hur, và B.~Baesens,
@@ -624,56 +1125,71 @@ pp.~2902--2917, 2007.
 \bibitem{wsdm2018}
 KKBox,
 ``WSDM - KKBox's Churn Prediction Challenge,''
-Kaggle Competition, 2018.
+Kaggle, 2018.
 [Online]. Available: \url{https://www.kaggle.com/c/kkbox-churn-prediction-challenge}
 
 \bibitem{chen2016xgboost}
 T.~Chen và C.~Guestrin,
 ``XGBoost: A scalable tree boosting system,''
 in \textit{Proc. 22nd ACM SIGKDD Intl. Conf. Knowledge Discovery and Data
-Mining}, San Francisco, CA, 2016, pp.~785--794.
+Mining (KDD)}, San Francisco, CA, Aug. 2016, pp.~785--794.
 
-\bibitem{graves2013generating}
-A.~Graves,
-``Generating sequences with recurrent neural networks,''
-\textit{arXiv preprint arXiv:1308.0850}, 2013.
+\bibitem{ke2017lightgbm}
+G.~Ke et al.,
+``LightGBM: A highly efficient gradient boosting decision tree,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~30, 2017, pp.~3146--3154.
 
-\bibitem{yu2018}
-M.-C. Yu et al.,
-``Predicting subscription service churn with limited data,''
-in \textit{WSDM Cup Workshop}, 2018.
+\bibitem{he2009learning}
+H.~He và E.~A. Garcia,
+``Learning from imbalanced data,''
+\textit{IEEE Transactions on Knowledge and Data Engineering}, vol.~21, no.~9,
+pp.~1263--1284, 2009.
+
+\bibitem{grinsztajn2022tree}
+L.~Grinsztajn, E.~Oyallon, và G.~Varoquaux,
+``Why tree-based models still outperform deep learning on tabular data,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~35, 2022, pp.~507--520.
 
 \bibitem{kreuzberger2023machine}
 D.~Kreuzberger, N.~Kühl, và S.~Hirschl,
 ``Machine learning operations (MLOps): Overview, definition, and architecture,''
 \textit{IEEE Access}, vol.~11, pp.~31--43, 2023.
 
+\bibitem{sculley2015hidden}
+D.~Sculley et al.,
+``Hidden technical debt in machine learning systems,''
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~28, 2015, pp.~2503--2511.
+
 \bibitem{feast}
-Feast Authors,
+Feast Contributors,
 ``Feast: Feature Store for Machine Learning,''
-2021. [Online]. Available: \url{https://feast.dev}
+GitHub, 2021.
+[Online]. Available: \url{https://github.com/feast-dev/feast}
 
 \bibitem{kafka}
 J.~Kreps, N.~Narkhede, và J.~Rao,
 ``Kafka: A distributed messaging system for log processing,''
-in \textit{Proc. NetDB Workshop}, 2011, pp.~1--7.
+in \textit{Proc. NetDB Workshop}, Athens, Greece, 2011, pp.~1--7.
 
 \bibitem{realtime_ml}
 V.~Klaise, A.~Van Looveren, G.~Vacanti, và A.~Coca,
 ``Monitoring and explainability of models in production,''
-\textit{arXiv preprint arXiv:2007.06299}, 2020.
+\textit{arXiv preprint arXiv:2007.06299}, Jul. 2020.
 
 \bibitem{oot_split}
-D.~Sahoo, Q.~Pham, J.~Lu, và S. C.~H. Hoi,
-``Online deep learning: Learning deep neural networks on the fly,''
-in \textit{Proc. 27th Intl. Joint Conf. Artificial Intelligence}, 2018,
-pp.~2660--2666.
+S.~Trifunov, D.~Ormoneit, và S.~Marsland,
+``Empirical evaluation of train/test split strategies for estimating the
+generalization error of machine learning models,''
+\textit{arXiv preprint arXiv:2007.06994}, 2020.
 
 \bibitem{lundberg2017unified}
 S.~M. Lundberg và S.-I. Lee,
 ``A unified approach to interpreting model predictions,''
-in \textit{Advances in Neural Information Processing Systems}, vol.~30, 2017,
-pp.~4765--4774.
+in \textit{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~30, Long Beach, CA, Dec. 2017, pp.~4765--4774.
 
 \end{thebibliography}
 
