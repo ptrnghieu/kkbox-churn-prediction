@@ -707,6 +707,11 @@ function StreamingPage({ apiUrl = '', onSelectMsno }) {
       if (d.status) setStreamStatus(d.status);
       if (d.current_date) setCurrentDate(d.current_date);
       if (d.dates_done !== undefined) setDatesDone(d.dates_done);
+      if (d.dates_list && d.dates_list.length > 0) {
+        const sorted = [...d.dates_list].sort();
+        setDatesList(sorted);
+        setSelectedDate(prev => prev || sorted[sorted.length - 1]);
+      }
     });
     es.addEventListener('date_done', e => {
       const d = JSON.parse(e.data);

@@ -238,6 +238,7 @@ async def stream_events() -> StreamingResponse:
         "status": _state["status"],
         "current_date": _state["current_date"],
         "dates_done": len(_state["dates_done"]),
+        "dates_list": _state["dates_done"],
     })
 
     async def generator() -> AsyncGenerator[str, None]:
