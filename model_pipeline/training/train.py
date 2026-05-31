@@ -132,6 +132,7 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     preprocessing_config = {
         "drop_cols": DROP_COLS,
         "num_cols_fill_zero": NUM_COLS,
+        "num_cols_medians": {col: float(df[col].median()) for col in NUM_COLS},
         "bd_median": bd_median,
         "city_mode": city_mode,
         "registered_via_mode": registered_via_mode,

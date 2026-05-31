@@ -1,191 +1,166 @@
 # KKBox Churn Prediction
 
-End-to-end MLOps pipeline dự đoán churn của KKBox music streaming, triển khai cloud-native trên GCP.
+End-to-end MLOps pipeline dự đoán churn của người dùng KKBox music streaming, triển khai trên GCP.
+
+Dự án sử dụng chiến lược **historical playback**: dữ liệu 2017 (Bronze `_v2` files) được replay qua Kafka để giả lập môi trường streaming thực tế, phục vụ online prediction và monitoring liên tục.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  DATA INGESTION & TRANSFORMATION                                    │
-│                                                                     │
-│  Kaggle ──► Kafka ──► GCS Bronze ──► Spark ──► GCS Silver/Gold     │
-│  (CSV)     (topics)   (raw CSV)    (clean,     (Parquet)            │
-│                                    aggregate)                       │
-│                                        │                            │
-│                                        ▼                            │
-│                              Feast Feature Store                    │
-│                              ├── Offline: BigQuery                  │
-│                              └── Online:  Redis                     │
-└─────────────────────────────────────────────────────────────────────┘
-                                        │
-┌─────────────────────────────────────────────────────────────────────┐
-│  MODEL TRAINING                                                     │
-│                                                                     │
-│  Training Features ──► XGBoost ──► MLflow ──► (New model?)         │
-│  (BigQuery offline)    (train.py)   (tracking                       │
-│                                     & registry)                     │
-└─────────────────────────────────────────────────────────────────────┘
-                                        │ Trigger (new model)
-┌─────────────────────────────────────────────────────────────────────┐
-│  SERVING                                                            │
-│                                                                     │
-│  Online Features (Redis) ──► FastAPI ◄── Roll out new model        │
-│                                │                                    │
-└────────────────────────────────┼────────────────────────────────────┘
-                                 │
-┌────────────────────────────────┼────────────────────────────────────┐
-│  MONITORING                    ▼                                    │
-│                                                                     │
-│  Prometheus ◄── scrape ── FastAPI /metrics                          │
-│      │                                                              │
-│      └──► Grafana (visualization)                                   │
-│                                                                     │
-│  Streamlit (user-facing dashboard) ◄──► End user                   │
-└─────────────────────────────────────────────────────────────────────┘
+GCS Bronze (_v2 CSVs)
+    │
+    ▼ kafka_producer.py  (streams trực tiếp từ GCS, không ghi disk)
+Kafka  (kkbox.user_logs, kkbox.transactions)
+    │  EOD marker trên cả hai topics sau mỗi ngày
+    ▼ kafka_consumer.py  (spawned bởi FastAPI /stream/start)
+BigQuery Gold  (features_streaming, append-only, partitioned by event_timestamp)
+    │
+    ▼ feast materialize  (background thread, chạy sau mỗi ngày)
+Redis (Cloud Memorystore)  -- latest cumulative features per msno
+    │
+    ▼
+FastAPI (:8000)  <--  nginx (:80)  <--  users
+    │
+    ▼
+React Dashboard (/ui/)
+  - Single User Predict
+  - Batch Predict
+  - Statistics
+  - Streaming Simulation
+  - Model Info
+  - API Health
 ```
 
-## Data Strategy — Historical Playback
-
-Dự án dùng chiến lược **historical playback** với dataset KKBox từ Kaggle:
+## Data Strategy
 
 | Layer | Nội dung | Trạng thái |
 |-------|----------|-----------|
-| **Bronze** | Raw CSV gốc từ Kaggle (toàn bộ thời gian) | ✅ Đã load lên GCS |
-| **Silver** | Cleaned & deduplicated Parquet | ✅ Đã xử lý qua Spark |
-| **Gold / features_train** | Feature-engineered, snapshot đến **2016-12-31** | ✅ Đang dùng để train |
-| **Gold / phần còn lại** | Dữ liệu sau 2016-12-31, còn ở Bronze/Silver | 🔜 Dùng cho simulated streaming |
-
-> Phần dữ liệu sau 2016-12-31 sẽ được replay qua Kafka để giả lập môi trường streaming thực tế, phục vụ online prediction và monitoring.
+| Bronze | Raw CSV gốc từ Kaggle (toàn bộ thời gian) | Đã load lên GCS |
+| Silver | Cleaned & deduplicated Parquet (Spark) | Đã xử lý |
+| Gold / features_train | Feature snapshot đến 2016-12-31, dùng cho training | Đang dùng |
+| Gold / features_streaming | Streaming updates từ 2017, append-only | Ghi bởi consumer |
 
 ## Modules
 
-| Module | Mô tả | Status |
-|--------|-------|--------|
-| `data_pipeline/` | Kafka ingestion, Spark Bronze→Silver→Gold | 🟡 In Progress |
-| `model_pipeline/` | Feast definitions, XGBoost training, MLflow | 🟡 In Progress |
-| `serving_pipeline/` | FastAPI online/batch prediction | 🟡 In Progress |
-| `monitoring_pipeline/` | Prometheus, Grafana, Streamlit dashboard | 🔴 TODO |
+| Module | Mô tả |
+|--------|-------|
+| `data_pipeline/` | Kafka producer/consumer, Spark Bronze→Silver→Gold |
+| `model_pipeline/` | XGBoost training, MLflow tracking, model upload lên GCS |
+| `feature_store/` | Feast definitions (entity, feature views), feast.yaml |
+| `serving_pipeline/` | FastAPI online/batch prediction, React dashboard |
+| `monitoring_pipeline/` | Prometheus scraping, Grafana dashboards |
 
-## GCP Resources
+## Deployment
 
-- **Project:** `kkbox-churn-prediction-493716`
+- **VM:** `kkbox-serving` — GCE e2-standard-2, asia-southeast1-b
+- **Static IP:** `35.198.232.66`
+- **Dashboard:** http://35.198.232.66/ui/
+- **nginx:** reverse proxy port 80 → uvicorn port 8000
+- **systemd:** service `kkbox-serving`, auto-restart on crash/reboot
+- **Kafka:** Docker (confluentinc/cp-kafka:7.5.0), ports 9092 (internal) / 9093 (host)
+- **Redis:** Cloud Memorystore tại `10.80.68.19:6379`
 - **GCS Bucket:** `gs://kkbox-churn-prediction-493716-data/`
-- **BigQuery table:** `kkbox_gold.features_train` — 1,082,190 rows, snapshot đến 2016-12-31
+- **BigQuery:** project `kkbox-churn-prediction-493716`
 
-## Model — Baseline Results
+## Model Results
 
-| Metric | Giá trị |
-|--------|---------|
-| AUC-ROC | **0.8924** |
+| Metric | Value |
+|--------|-------|
+| AUC-ROC | 0.8924 |
 | AUC-PR | 0.5044 |
-| F1 (threshold=0.5) | 0.5068 |
+| F1 | 0.5068 |
 | Precision | 0.3593 |
 | Recall | 0.8596 |
-| Best threshold (F1-opt) | **0.789** |
+| Optimal threshold | 0.789 |
 
-Split strategy: **out-of-time** theo `registration_init_time < 2016-06-01`
-Train: 804k rows · Test: 157k rows · Churn rate: ~10%
+Split strategy: **out-of-time** theo `registration_init_time < 2016-06-01`.
+Train: ~804k rows — Test: ~157k rows — Churn rate: ~10%.
 
-## Feature Store
-
-- **Offline Store:** BigQuery (`kkbox_gold.features_train`)
-- **Online Store:** Redis
-
-```bash
-cd serving_pipeline
-source venv/bin/activate          # hoặc venv\Scripts\activate trên Windows
-feast -c ../feature_store apply
-```
-
-## Quick Start
+## Quick Start (local dev)
 
 ```bash
 git clone <repo-url>
 cd kkbox-churn-prediction
-make setup
-make start
-make test
-```
 
-## Training
+# Start Kafka (KRaft mode, no ZooKeeper)
+docker compose up -d kafka
 
-```bash
-# Mặc định (đọc từ BigQuery, log vào MLflow local)
+# Apply Feast definitions
+feast -c feature_store apply
+
+# Train model (reads from BigQuery)
 python model_pipeline/training/train.py
 
-# Tùy chỉnh hyperparameters
-python model_pipeline/training/train.py \
-  --n-estimators 1000 \
-  --max-depth 5 \
-  --learning-rate 0.03
-```
-
-Environment variables:
-
-<<<<<<< HEAD
-- Check entities and features:
-  feast -c ../feature_store entities list
-  feast -c ../feature_store feature-views list
-
-- Materialize features to online store:
-  feast -c ../feature_store materialize 2026-01-1 2026-05-25
-
-## API serving
-
-- How to start:
-  cd serving_pipeline
-  venv\Scripts\activate or source venv/bin/activate
-  uvicorn app.main:app --reload
-
-  grafana: http://localhost:3000 (admin:admin)
-
-# Mornitoring
-
-- How to start:
-  cd monitoring_pipeline
-  docker-compose up -d
-
-## Docs
-=======
-| Variable | Default | Mô tả |
-|----------|---------|-------|
-| `GCP_PROJECT_ID` | `kkbox-churn-prediction-493716` | GCP project |
-| `BQ_FEATURES_TABLE` | `kkbox-churn-prediction-493716.kkbox_gold.features_train` | BigQuery source |
-| `MLFLOW_TRACKING_URI` | `mlruns` | MLflow backend |
-| `MLFLOW_EXPERIMENT_NAME` | `kkbox-churn-xgboost` | Tên experiment |
-| `MODEL_NAME` | `kkbox-churn-model` | Tên registered model |
-
-## Serving API
-
-```bash
+# Start API server
 cd serving_pipeline
 uvicorn app.main:app --reload --port 8000
 ```
 
-| Endpoint | Method | Mô tả |
-|----------|--------|-------|
-| `/predict/` | POST | Single user prediction |
-| `/predict/batch` | POST | Batch prediction |
-| `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics |
+Truy cập dashboard tại http://localhost:8000/ui/
 
-## Monitoring
+## GCP Resources
 
-```bash
-cd monitoring_pipeline
-docker-compose up -d
+| Resource | Value |
+|----------|-------|
+| Project ID | `kkbox-churn-prediction-493716` |
+| GCS Bucket | `gs://kkbox-churn-prediction-493716-data/` |
+| Model path | `gs://kkbox-churn-prediction-493716-data/models/kkbox-churn-xgboost/` |
+| BQ training table | `kkbox-churn-prediction-493716.kkbox_gold.features_train` |
+| BQ streaming table | `kkbox-churn-prediction-493716.kkbox_gold.features_streaming` |
+| Redis | `10.80.68.19:6379` (Cloud Memorystore) |
+
+## Repository Layout
+
+```
+kkbox-churn-prediction/
+├── docker-compose.yml          # Kafka, Redis (local dev), MLflow, api_serving
+├── feature_store/              # Feast definitions
+│   ├── feature_store.yaml
+│   ├── entities.py
+│   └── feature_views.py
+├── data_pipeline/
+│   ├── ingestion/
+│   │   ├── kafka_producer.py   # Streams _v2 CSVs từ GCS → Kafka
+│   │   └── kafka_consumer.py   # Kafka → BigQuery + Feast Redis
+│   └── processing/
+│       ├── bronze_to_silver.py # Spark: clean, cast, deduplicate
+│       └── silver_to_gold.py   # Spark: feature aggregation, join
+├── model_pipeline/
+│   └── training/
+│       ├── train.py
+│       └── update_preprocessing_config.py
+├── serving_pipeline/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── predict.py
+│   │   ├── explain.py
+│   │   ├── stream.py
+│   │   ├── feature_cache.py
+│   │   ├── metrics.py
+│   │   ├── schemas.py
+│   │   └── stats_store.py
+│   ├── service/
+│   │   └── prediction.py
+│   └── static/                 # React dashboard (CDN + Babel, no build step)
+│       ├── index.html
+│       ├── pages.jsx
+│       └── charts.jsx
+└── monitoring_pipeline/
+    ├── prometheus.yml
+    ├── docker-compose.yml
+    └── grafana/
+        ├── provisioning/
+        └── dashboards/
 ```
 
-| Service | URL | Mô tả |
-|---------|-----|-------|
-| Prometheus | http://localhost:9090 | Metrics collection |
-| Grafana | http://localhost:3000 | Dashboards (admin/admin) |
-| Streamlit | http://localhost:8501 | User-facing dashboard |
+## Environment Variables
 
-## Spark Jobs
+Các biến quan trọng cần thiết lập (có thể dùng file `.env`):
 
-```bash
-make spark-bronze-silver   # Bronze → Silver
-make spark-silver-gold     # Silver → Gold
-```
->>>>>>> 23a6bda890317f2f43ef6094774f0b93b58ed025
+| Variable | Default | Mô tả |
+|----------|---------|-------|
+| `GCP_PROJECT_ID` | `kkbox-churn-prediction-493716` | GCP project |
+| `GCS_BUCKET` | `kkbox-churn-prediction-493716-data` | GCS bucket chứa model |
+| `FEAST_REPO_PATH` | `../feature_store` | Đường dẫn tới Feast repo |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker |
+| `CHURN_THRESHOLD` | `0.781` | Ngưỡng quyết định churn |
