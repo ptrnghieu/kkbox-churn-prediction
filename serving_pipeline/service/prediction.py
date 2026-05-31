@@ -85,11 +85,14 @@ def _load_artifacts() -> tuple[xgb.XGBClassifier, dict, list[str]]:
 
 
 def _preprocess(features: dict, config: dict, feature_cols: list[str]) -> pd.DataFrame:
+    medians = config.get("num_cols_medians", {})
     row = {}
     for col in feature_cols:
         val = features.get(col)
         if col in config["num_cols_fill_zero"]:
-            row[col] = val if val is not None else 0
+            # Cold-start users (val is None) get population median so the model
+            # sees an average user rather than a completely inactive one.
+            row[col] = val if val is not None else medians.get(col, 0)
         elif col == "bd":
             row[col] = val if val is not None else config["bd_median"]
         elif col == "city":
