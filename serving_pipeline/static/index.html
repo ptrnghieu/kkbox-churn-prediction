@@ -332,6 +332,15 @@
       );
     }
 
+    const ALL_PAGES = [
+      { id: 'single', Comp: SingleUserPage },
+      { id: 'batch',  Comp: BatchPage },
+      { id: 'stats',  Comp: StatisticsPage },
+      { id: 'stream', Comp: StreamingPage },
+      { id: 'model',  Comp: ModelInfoPage },
+      { id: 'health', Comp: APIHealthPage },
+    ];
+
     function App() {
       const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
       const [page, setPage] = useState('single');
@@ -344,9 +353,6 @@
         t.accent === '#CF6F3C' ? '#b85e2f' : t.accent + 'cc');
 
       const handleSelectMsno = (msno) => { setSelectedMsno(msno); setPage('single'); };
-
-      const PageComp = { single: SingleUserPage, batch: BatchPage, stats: StatisticsPage,
-        stream: StreamingPage, model: ModelInfoPage, health: APIHealthPage }[page];
 
       // Live sidebar health check
       useEffect(() => {
@@ -365,9 +371,15 @@
           <div className="main">
             <PageHeader page={page} />
             <div className="page-content">
-              <PageComp apiUrl={t.apiUrl}
-                selectedMsno={page === 'single' ? selectedMsno : undefined}
-                onSelectMsno={handleSelectMsno} />
+              {ALL_PAGES.map(({ id, Comp }) => (
+                <div key={id} style={{ display: page === id ? 'block' : 'none' }}>
+                  <Comp
+                    apiUrl={t.apiUrl}
+                    selectedMsno={id === 'single' ? selectedMsno : undefined}
+                    onSelectMsno={handleSelectMsno}
+                  />
+                </div>
+              ))}
             </div>
           </div>
           <TweaksPanel>
