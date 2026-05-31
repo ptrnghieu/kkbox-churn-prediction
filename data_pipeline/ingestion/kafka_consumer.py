@@ -21,6 +21,8 @@ import argparse
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -199,45 +201,109 @@ def materialize(date_str: str, dry_run: bool) -> None:
 
 # ── Consumer ──────────────────────────────────────────────────────────────────
 
-def consume(bootstrap_servers: str, dry_run: bool) -> None:
-    bq = bigquery.Client(project=GCP_PROJECT_ID)
-    if not dry_run:
-        ensure_table(bq)
-    members = load_members(bq)
+def _notify(url: str, date: str, msnos: list) -> None:
+    """POST date + msnos to the stream controller (best-effort)."""
+    import urllib.request
+    body = json.dumps({"date": date, "msnos": msnos}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        log.warning("Failed to notify %s for date %s: %s", url, date, exc)
 
+
+def consume(bootstrap_servers: str, dry_run: bool,
+            notify_url: str = None, group_id: str = "kkbox-feature-consumer",
+            auto_offset_reset: str = "earliest",
+            idle_timeout_ms: int = 30_000) -> None:
+    bq = bigquery.Client(project=GCP_PROJECT_ID)
+
+    # Create KafkaConsumer FIRST so we claim the current "latest" offset
+    # before spending 60+ seconds loading member profiles from BigQuery.
+    # Messages produced after this poll() call will be visible to the consumer.
     consumer = KafkaConsumer(
         TOPIC_USER_LOGS,
         TOPIC_TRANSACTIONS,
         bootstrap_servers=bootstrap_servers,
-        group_id="kkbox-feature-consumer",
-        auto_offset_reset="earliest",
+        group_id=group_id,
+        auto_offset_reset=auto_offset_reset,
         value_deserializer=lambda b: json.loads(b.decode("utf-8")),
-        consumer_timeout_ms=30_000,  # stop after 30s idle
+        consumer_timeout_ms=idle_timeout_ms,
+        # BQ write + Feast materialize can take several minutes per day;
+        # set max_poll_interval to 30 min so the consumer isn't kicked mid-flush
+        max_poll_interval_ms=1_800_000,
     )
+    # Force partition assignment + offset seek NOW (before loading members)
+    consumer.poll(timeout_ms=10_000)
+    log.info("Consumer partition assignment complete — offset position locked")
+
+    if not dry_run:
+        ensure_table(bq)
+    members = load_members(bq)
 
     # Buffer: date → msno → [records]
     logs_by_date: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     txns_by_date: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
     flushed_dates: set[str] = set()
+    # Track EOD receipt per topic — flush only when both are received
+    eod_logs: set[str] = set()
+    eod_txns: set[str] = set()
     current_date: str | None = None
+
+    # Background worker: runs BQ write + Feast materialize serially so the
+    # consumer loop is never blocked waiting for slow storage operations.
+    _bg_queue: queue.Queue = queue.Queue()
+
+    def _bg_worker() -> None:
+        while True:
+            item = _bg_queue.get()
+            if item is None:
+                break
+            date_str, rows = item
+            write_to_bq(bq, rows, dry_run)
+            materialize(date_str, dry_run)
+            _bg_queue.task_done()
+
+    _bg_thread = threading.Thread(target=_bg_worker, daemon=True)
+    _bg_thread.start()
 
     def flush(date: str) -> None:
         if date in flushed_dates:
             return
+        all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
         log.info("Flushing date %s — logs: %d users, txns: %d users",
                  date, len(logs_by_date[date]), len(txns_by_date[date]))
-        rows = build_rows(date, logs_by_date[date], txns_by_date[date], members)
-        write_to_bq(bq, rows, dry_run)
-        materialize(date, dry_run)
+        # Notify UI immediately so users appear in dashboard without delay
+        if notify_url:
+            _notify(notify_url, date, all_msno)
         flushed_dates.add(date)
-        # Free memory
+        rows = build_rows(date, logs_by_date[date], txns_by_date[date], members)
+        # Free memory before handing rows to background thread
         del logs_by_date[date]
         del txns_by_date[date]
+        # BQ write + Feast materialize run in background — consumer loop continues immediately
+        _bg_queue.put((date, rows))
 
     try:
         for msg in consumer:
             record = msg.value
             topic  = msg.topic
+
+            # End-of-day marker sent by producer on BOTH topics after each day.
+            # Only flush when both markers are received — prevents flushing before
+            # all transactions are consumed (two topics are read interleaved).
+            if record.get("_end_of_day"):
+                eod_date = record.get("date", "")[:10]
+                if eod_date:
+                    if topic == TOPIC_USER_LOGS:
+                        eod_logs.add(eod_date)
+                    else:
+                        eod_txns.add(eod_date)
+                    if eod_date in eod_logs and eod_date in eod_txns:
+                        if eod_date not in flushed_dates:
+                            flush(eod_date)
+                current_date = None
+                continue
 
             if topic == TOPIC_USER_LOGS:
                 date = record.get("date", "")[:10]
@@ -252,7 +318,7 @@ def consume(bootstrap_servers: str, dry_run: bool) -> None:
             else:
                 continue
 
-            # Flush previous date when a new date is detected
+            # Fallback: flush previous date when a new date is detected
             if current_date and date != current_date and current_date not in flushed_dates:
                 flush(current_date)
 
@@ -265,6 +331,10 @@ def consume(bootstrap_servers: str, dry_run: bool) -> None:
         # Flush remaining buffer
         if current_date and current_date not in flushed_dates:
             flush(current_date)
+        # Wait for background BQ/Feast work to finish, then stop worker
+        _bg_queue.join()
+        _bg_queue.put(None)
+        _bg_thread.join()
         consumer.close()
         log.info("Consumer closed")
 
@@ -283,10 +353,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Consume and aggregate without writing to BigQuery or Redis",
     )
+    p.add_argument(
+        "--notify-url",
+        default=None,
+        help="URL to POST after each date is flushed (used by streaming simulation UI)",
+    )
+    p.add_argument(
+        "--group-id",
+        default=os.getenv("KAFKA_GROUP_ID", "kkbox-feature-consumer"),
+        help="Kafka consumer group ID (default: kkbox-feature-consumer)",
+    )
+    p.add_argument(
+        "--offset-reset",
+        default="earliest",
+        choices=["earliest", "latest"],
+        help="auto_offset_reset policy (default: earliest)",
+    )
+    p.add_argument(
+        "--idle-timeout-ms",
+        type=int,
+        default=30_000,
+        help="Stop consuming after N ms of no messages (default: 30000)",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    log.info("Starting consumer — servers=%s  dry_run=%s", args.bootstrap_servers, args.dry_run)
-    consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run)
+    log.info("Starting consumer — servers=%s  dry_run=%s  group=%s  offset_reset=%s  idle_timeout=%dms",
+             args.bootstrap_servers, args.dry_run, args.group_id, args.offset_reset, args.idle_timeout_ms)
+    consume(bootstrap_servers=args.bootstrap_servers, dry_run=args.dry_run,
+            notify_url=args.notify_url, group_id=args.group_id,
+            auto_offset_reset=args.offset_reset, idle_timeout_ms=args.idle_timeout_ms)

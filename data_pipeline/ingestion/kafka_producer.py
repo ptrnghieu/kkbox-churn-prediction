@@ -4,9 +4,6 @@ Kafka Producer — Historical Playback Streaming
 Replays Bronze-layer _v2 CSV files (2017 data) to Kafka topics in
 chronological order, simulating real-time data ingestion.
 
-Architecture:
-  GCS Bronze (_v2 CSVs) → Kafka → Consumer → GCS Bronze → Spark → Silver → Gold → Feast
-
 Topics:
   kkbox.user_logs    — daily listening activity per user
   kkbox.transactions — subscription transactions per user
@@ -18,40 +15,49 @@ Bronze files streamed:
 from __future__ import annotations
 
 import argparse
-import io
+import gc
 import json
 import logging
 import os
 import time
+from collections import defaultdict
 from datetime import date, datetime
 
 import pandas as pd
-from google.cloud import storage as gcs
 from kafka import KafkaProducer
-from kafka.errors import KafkaError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-GCS_BUCKET = os.getenv("GCS_BUCKET", "kkbox-churn-prediction-493716-data")
+GCS_BUCKET     = os.getenv("GCS_BUCKET",     "kkbox-churn-prediction-493716-data")
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "kkbox-churn-prediction-493716")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
-TOPIC_USER_LOGS = "kkbox.user_logs"
+GCS_USER_LOGS    = f"gs://{GCS_BUCKET}/bronze/raw/user_logs_v2.csv"
+GCS_TRANSACTIONS = f"gs://{GCS_BUCKET}/bronze/raw/transactions_v2.csv"
+
+DATE_FORMAT = "%Y%m%d"
+STREAM_START_DATE = date(2017, 3, 1)
+
+TOPIC_USER_LOGS    = "kkbox.user_logs"
 TOPIC_TRANSACTIONS = "kkbox.transactions"
 
-BRONZE_PREFIX = "bronze/raw"
-USER_LOGS_V2 = f"{BRONZE_PREFIX}/user_logs_v2.csv"
-TRANSACTIONS_V2 = f"{BRONZE_PREFIX}/transactions_v2.csv"
-
-# Date column values in Bronze are INTEGER yyyyMMdd
-DATE_FORMAT = "%Y%m%d"
-
-# Stream from 2017-03-01: first date where both user_logs AND transactions
-# are available. Jan-Feb 2017 has transactions only (user_logs_v2 starts March).
-STREAM_START_DATE = date(2017, 3, 1)
+# Optimized dtypes — keeps each chunk lean in RAM
+_UL_DTYPES = {
+    "num_25":    "int32",
+    "num_50":    "int32",
+    "num_75":    "int32",
+    "num_985":   "int32",
+    "num_100":   "int32",
+    "num_unq":   "int32",
+    "total_secs": "float32",
+}
+_TX_DTYPES = {
+    "actual_amount_paid": "float32",
+    "plan_list_price":    "float32",
+}
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -68,13 +74,10 @@ def _serialize(value: dict) -> bytes:
 
 # ── GCS helpers ───────────────────────────────────────────────────────────────
 
-def _download_csv(client: gcs.Client, blob_path: str) -> pd.DataFrame:
-    log.info("Downloading gs://%s/%s ...", GCS_BUCKET, blob_path)
-    bucket = client.bucket(GCS_BUCKET)
-    data = bucket.blob(blob_path).download_as_bytes()
-    df = pd.read_csv(io.BytesIO(data))
-    log.info("Downloaded %s — shape: %s", blob_path.split("/")[-1], df.shape)
-    return df
+def _gcs_chunks(gcs_url: str, chunksize: int, **read_kwargs):
+    """Yield pandas DataFrame chunks streamed from a GCS URL — no local disk used."""
+    log.info("Streaming %s in %d-row chunks ...", gcs_url, chunksize)
+    return pd.read_csv(gcs_url, chunksize=chunksize, **read_kwargs)
 
 
 # ── Producer helpers ──────────────────────────────────────────────────────────
@@ -98,80 +101,101 @@ def _send(producer: KafkaProducer, topic: str, key: str, record: dict) -> None:
 # ── Replay logic ──────────────────────────────────────────────────────────────
 
 def replay(speed: float, dry_run: bool) -> None:
-    """
-    Main replay loop — process one day at a time in chronological order.
-
-    Args:
-        speed:   Seconds to sleep between days. 0 = full speed.
-        dry_run: Log messages without sending to Kafka.
-    """
-    gcs_client = gcs.Client(project=GCP_PROJECT_ID)
-
-    # Load both files upfront (1.3 GB + 110 MB)
-    user_logs = _download_csv(gcs_client, USER_LOGS_V2)
-    transactions = _download_csv(gcs_client, TRANSACTIONS_V2)
-
-    # Parse date columns (INTEGER yyyyMMdd → date)
-    user_logs["date"] = pd.to_datetime(user_logs["date"].astype(str), format=DATE_FORMAT).dt.date
-    transactions["transaction_date"] = pd.to_datetime(
-        transactions["transaction_date"].astype(str), format=DATE_FORMAT
-    ).dt.date
-
-    # Filter to post-training data only (transactions_v2 contains pre-2017 history too)
-    transactions = transactions[transactions["transaction_date"] >= STREAM_START_DATE]
-    user_logs = user_logs[user_logs["date"] >= STREAM_START_DATE]
-    log.info(
-        "After filter (>= %s): user_logs=%d rows, transactions=%d rows",
-        STREAM_START_DATE, len(user_logs), len(transactions),
-    )
-
-
-    # Build per-date groups
-    logs_by_date = dict(tuple(user_logs.groupby("date")))
-    txn_by_date = dict(tuple(transactions.groupby("transaction_date")))
-
-    all_dates = sorted(set(logs_by_date) | set(txn_by_date))
-    log.info("Dates to replay: %d  (%s → %s)", len(all_dates), all_dates[0], all_dates[-1])
+    # ── Pre-load transactions — small file (~110 MB on disk, ~25 MB as pandas)
+    log.info("Pre-loading transactions from GCS ...")
+    txns_by_date: dict[date, list[pd.DataFrame]] = defaultdict(list)
+    tx_total = 0
+    for chunk in _gcs_chunks(GCS_TRANSACTIONS, 50_000, dtype=_TX_DTYPES):
+        chunk["transaction_date"] = pd.to_datetime(
+            chunk["transaction_date"].astype(str), format=DATE_FORMAT
+        ).dt.date
+        chunk = chunk[chunk["transaction_date"] >= STREAM_START_DATE]
+        tx_total += len(chunk)
+        for d, grp in chunk.groupby("transaction_date"):
+            txns_by_date[d].append(grp.reset_index(drop=True))
+    gc.collect()
+    log.info("Loaded %d transaction rows across %d dates", tx_total, len(txns_by_date))
 
     producer = None if dry_run else _make_producer()
-
     total_logs = 0
-    total_txn = 0
+    total_txn  = 0
 
-    for current_date in all_dates:
-        log.info("--- %s ---", current_date)
+    # Accumulate current date's user_log DataFrames (one day at a time)
+    current_date: date | None = None
+    ul_parts: list[pd.DataFrame] = []
 
-        # user_logs
-        if current_date in logs_by_date:
-            records = logs_by_date[current_date].to_dict(orient="records")
-            for record in records:
-                record["date"] = current_date.isoformat()
+    def _send_date(d: date) -> None:
+        nonlocal total_logs, total_txn, ul_parts
+        log.info("--- %s ---", d)
+
+        # Send user_logs one 200k-row part at a time — never converts all rows to
+        # dicts simultaneously, keeping peak memory low
+        ul_count = 0
+        for part in ul_parts:
+            records = part.to_dict(orient="records")
+            for rec in records:
+                rec["date"] = d.isoformat()
                 if not dry_run:
-                    _send(producer, TOPIC_USER_LOGS, record.get("msno"), record)
-            total_logs += len(records)
-            log.info("  user_logs:    %d", len(records))
+                    _send(producer, TOPIC_USER_LOGS, rec.get("msno"), rec)
+            ul_count += len(records)
+        ul_parts = []
+        total_logs += ul_count
+        log.info("  user_logs:    %d", ul_count)
 
-        # transactions
-        if current_date in txn_by_date:
-            records = txn_by_date[current_date].to_dict(orient="records")
-            for record in records:
-                record["transaction_date"] = current_date.isoformat()
-                if not dry_run:
-                    _send(producer, TOPIC_TRANSACTIONS, record.get("msno"), record)
-            total_txn += len(records)
-            log.info("  transactions: %d", len(records))
+        # Send transactions
+        if d in txns_by_date:
+            tx_count = 0
+            for part in txns_by_date.pop(d):
+                records = part.to_dict(orient="records")
+                for rec in records:
+                    rec["transaction_date"] = d.isoformat()
+                    if not dry_run:
+                        _send(producer, TOPIC_TRANSACTIONS, rec.get("msno"), rec)
+                tx_count += len(records)
+            total_txn += tx_count
+            log.info("  transactions: %d", tx_count)
 
         if producer:
+            producer.flush()
+            # Send EOD marker on BOTH topics so the consumer can wait for both
+            # before flushing — avoids flushing before all transactions are read.
+            eod = {"_end_of_day": True, "date": d.isoformat()}
+            _send(producer, TOPIC_USER_LOGS,    "__eod__", eod)
+            _send(producer, TOPIC_TRANSACTIONS, "__eod__", eod)
             producer.flush()
         if speed > 0:
             time.sleep(speed)
 
+    # ── Stream user_logs from GCS, flushing one day at a time ─────────────
+    for chunk in _gcs_chunks(GCS_USER_LOGS, 200_000, dtype=_UL_DTYPES):
+        chunk["date"] = pd.to_datetime(
+            chunk["date"].astype(str), format=DATE_FORMAT
+        ).dt.date
+        chunk = chunk[chunk["date"] >= STREAM_START_DATE]
+
+        for d, grp in chunk.groupby("date"):
+            if current_date is None:
+                current_date = d
+            elif d != current_date:
+                _send_date(current_date)
+                current_date = d
+            ul_parts.append(grp.reset_index(drop=True))
+
+    # Flush final user_log date
+    if current_date:
+        _send_date(current_date)
+
+    # Send any transaction-only dates (no user_log activity)
+    for d in sorted(txns_by_date):
+        ul_parts = []
+        current_date = d
+        _send_date(d)
+
     if producer:
-        producer.flush()
         producer.close()
 
     log.info("=== Replay complete ===")
-    log.info("Total user_log records : %d", total_logs)
+    log.info("Total user_log records  : %d", total_logs)
     log.info("Total transaction records: %d", total_txn)
 
 

@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+aiofiles
 pydantic
 scikit-learn
 xgboost
@@ -7,6 +8,7 @@ numpy
 pandas
 feast[gcp,redis]
 google-cloud-storage
+gcsfs
 python-dotenv
 prometheus_client
 shap
