@@ -86,10 +86,29 @@ class NotifyRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _kill_stale_workers() -> None:
+    """Kill any orphaned producer/consumer from a previous uvicorn session."""
+    for script in ("kafka_producer.py", "kafka_consumer.py"):
+        try:
+            subprocess.run(["pkill", "-f", script], check=False)
+        except Exception:
+            pass
+    # Also kill by tracked PIDs if still alive
+    for key in ("producer_pid", "consumer_pid"):
+        pid = _state.get(key)
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+
 @router.post("/start")
 async def stream_start(req: StartRequest) -> dict:
     if _state["status"] in ("running", "paused"):
         raise HTTPException(400, "Stream already active — call /stream/stop first")
+
+    _kill_stale_workers()
 
     _state.update({
         "status": "running",
@@ -100,6 +119,7 @@ async def stream_start(req: StartRequest) -> dict:
         "consumer_pid": None,
     })
     _date_users.clear()
+    feature_cache.clear()
 
     group_id = f"kkbox-stream-{int(time.time())}"
     env = {**os.environ,
