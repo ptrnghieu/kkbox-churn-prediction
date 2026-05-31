@@ -78,23 +78,36 @@ BQ_SCHEMA = [
 # ── Member cache ──────────────────────────────────────────────────────────────
 
 def load_members(bq: bigquery.Client) -> dict[str, dict]:
-    """Load member profile features from BigQuery into memory."""
+    """Load full feature baseline from features_train into memory."""
     log.info("Loading member profiles from BigQuery...")
     query = f"""
-        SELECT msno, city, bd, gender, registered_via
+        SELECT msno, city, bd, gender, registered_via,
+               total_transactions, total_amount_paid, auto_renew_count, cancel_count,
+               total_log_days, total_secs,
+               total_num_25, total_num_50, total_num_75, total_num_985, total_num_100, total_num_unq
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.features_train`
-        WHERE city IS NOT NULL OR bd IS NOT NULL
     """
     rows = bq.query(query).result()
-    members = {
-        row.msno: {
-            "city": row.city,
-            "bd": row.bd,
-            "gender": row.gender,
-            "registered_via": row.registered_via,
+    members = {}
+    for row in rows:
+        members[row.msno] = {
+            "city":               row.city,
+            "bd":                 row.bd,
+            "gender":             row.gender,
+            "registered_via":     row.registered_via,
+            "total_transactions": row.total_transactions or 0,
+            "total_amount_paid":  float(row.total_amount_paid or 0),
+            "auto_renew_count":   row.auto_renew_count or 0,
+            "cancel_count":       row.cancel_count or 0,
+            "total_log_days":     row.total_log_days or 0,
+            "total_secs":         float(row.total_secs or 0),
+            "total_num_25":       row.total_num_25 or 0,
+            "total_num_50":       row.total_num_50 or 0,
+            "total_num_75":       row.total_num_75 or 0,
+            "total_num_985":      row.total_num_985 or 0,
+            "total_num_100":      row.total_num_100 or 0,
+            "total_num_unq":      row.total_num_unq or 0,
         }
-        for row in rows
-    }
     log.info("Loaded %d member profiles", len(members))
     return members
 
@@ -135,26 +148,70 @@ def build_rows(
     logs_buf: dict[str, list],
     txns_buf: dict[str, list],
     members: dict[str, dict],
-) -> list[dict]:
-    """Combine log + txn aggregates with member profile into BQ rows."""
+) -> tuple[list[dict], dict[str, dict]]:
+    """Accumulate baseline + streaming delta into cumulative features.
+
+    Returns (bq_rows, updated_baselines) where updated_baselines should
+    be merged back into members so the next day starts from this state.
+    """
     all_msno = set(logs_buf) | set(txns_buf)
     event_ts = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    rows = []
+    rows: list[dict] = []
+    updates: dict[str, dict] = {}
+
     for msno in all_msno:
-        row: dict[str, Any] = {"msno": msno, "event_timestamp": event_ts.isoformat()}
-        member = members.get(msno, {})
-        row.update({
-            "city":           member.get("city"),
-            "bd":             member.get("bd"),
-            "gender":         member.get("gender"),
-            "registered_via": member.get("registered_via"),
-        })
-        if msno in logs_buf:
-            row.update(_aggregate_logs(logs_buf[msno]))
-        if msno in txns_buf:
-            row.update(_aggregate_txns(txns_buf[msno]))
+        base = members.get(msno, {})
+        log_d = _aggregate_logs(logs_buf[msno]) if msno in logs_buf else {}
+        txn_d = _aggregate_txns(txns_buf[msno]) if msno in txns_buf else {}
+
+        # Cumulative totals — baseline historical + today's delta
+        total_log_days     = (base.get("total_log_days")     or 0) + (log_d.get("total_log_days")     or 0)
+        total_secs         = (base.get("total_secs")         or 0) + (log_d.get("total_secs")         or 0)
+        total_num_25       = (base.get("total_num_25")       or 0) + (log_d.get("total_num_25")       or 0)
+        total_num_50       = (base.get("total_num_50")       or 0) + (log_d.get("total_num_50")       or 0)
+        total_num_75       = (base.get("total_num_75")       or 0) + (log_d.get("total_num_75")       or 0)
+        total_num_985      = (base.get("total_num_985")      or 0) + (log_d.get("total_num_985")      or 0)
+        total_num_100      = (base.get("total_num_100")      or 0) + (log_d.get("total_num_100")      or 0)
+        total_num_unq      = (base.get("total_num_unq")      or 0) + (log_d.get("total_num_unq")      or 0)
+        total_transactions = (base.get("total_transactions") or 0) + (txn_d.get("total_transactions") or 0)
+        total_amount_paid  = (base.get("total_amount_paid")  or 0) + (txn_d.get("total_amount_paid")  or 0)
+        auto_renew_count   = (base.get("auto_renew_count")   or 0) + (txn_d.get("auto_renew_count")   or 0)
+        cancel_count       = (base.get("cancel_count")       or 0) + (txn_d.get("cancel_count")       or 0)
+
+        row: dict[str, Any] = {
+            "msno":               msno,
+            "event_timestamp":    event_ts.isoformat(),
+            "city":               base.get("city"),
+            "bd":                 base.get("bd"),
+            "gender":             base.get("gender"),
+            "registered_via":     base.get("registered_via"),
+            "total_log_days":     total_log_days,
+            "total_secs":         total_secs,
+            "avg_daily_secs":     total_secs / total_log_days if total_log_days > 0 else None,
+            "total_num_25":       total_num_25,
+            "total_num_50":       total_num_50,
+            "total_num_75":       total_num_75,
+            "total_num_985":      total_num_985,
+            "total_num_100":      total_num_100,
+            "total_num_unq":      total_num_unq,
+            "total_transactions": total_transactions,
+            "total_amount_paid":  total_amount_paid,
+            "avg_amount_paid":    total_amount_paid / total_transactions if total_transactions > 0 else None,
+            "auto_renew_count":   auto_renew_count,
+            "cancel_count":       cancel_count,
+        }
         rows.append(row)
-    return rows
+
+        # Updated baseline for next day's accumulation
+        updates[msno] = {**base,
+                         "total_log_days": total_log_days, "total_secs": total_secs,
+                         "total_num_25": total_num_25, "total_num_50": total_num_50,
+                         "total_num_75": total_num_75, "total_num_985": total_num_985,
+                         "total_num_100": total_num_100, "total_num_unq": total_num_unq,
+                         "total_transactions": total_transactions, "total_amount_paid": total_amount_paid,
+                         "auto_renew_count": auto_renew_count, "cancel_count": cancel_count}
+
+    return rows, updates
 
 
 # ── BigQuery helpers ──────────────────────────────────────────────────────────
@@ -273,15 +330,14 @@ def consume(bootstrap_servers: str, dry_run: bool,
         all_msno = list(set(logs_by_date[date]) | set(txns_by_date[date]))
         log.info("Flushing date %s — logs: %d users, txns: %d users",
                  date, len(logs_by_date[date]), len(txns_by_date[date]))
-        # Notify UI immediately so users appear in dashboard without delay
         if notify_url:
             _notify(notify_url, date, all_msno)
         flushed_dates.add(date)
-        rows = build_rows(date, logs_by_date[date], txns_by_date[date], members)
-        # Free memory before handing rows to background thread
+        rows, updates = build_rows(date, logs_by_date[date], txns_by_date[date], members)
+        # Update in-memory baseline so next day accumulates on top of today's cumulative
+        members.update(updates)
         del logs_by_date[date]
         del txns_by_date[date]
-        # BQ write + Feast materialize run in background — consumer loop continues immediately
         _bg_queue.put((date, rows))
 
     try:
