@@ -1,47 +1,28 @@
 # Monitoring Pipeline
 
-Prometheus + Grafana for infrastructure metrics, Streamlit for business dashboard.
-
----
+Prometheus + Grafana for infrastructure and prediction metrics. Business dashboard is the React UI built into the FastAPI serving app (no Streamlit).
 
 ## Architecture
 
 ```
-FastAPI (:8000/metrics)
+FastAPI (:8000/metrics)   ←  systemd service kkbox-serving on kkbox-serving VM
         │
         ▼ scrape every 15s
-   Prometheus (:9090)
+   Prometheus (:9090)     ←  Docker (monitoring_pipeline/docker-compose.yml)
         │
         ▼ datasource
-    Grafana (:3000)          Streamlit (:8501)
-                                    │
-                                    ▼ HTTP POST
-                             FastAPI (:8000/predict)
+    Grafana (:3000)       ←  Docker (monitoring_pipeline/docker-compose.yml)
 ```
 
-All services run on the same Docker network `churn-network` created by the root `docker-compose.yml`.
-
----
-
-## Prerequisites
-
-- Docker + Docker Compose installed on the deployment VM
-- Root `docker-compose.yml` already running (FastAPI `api_serving` container must be up)
-- No extra GCP credentials needed — this stack is purely internal
-
----
+Prometheus scrapes the VM's FastAPI `/metrics` endpoint via its internal IP or `localhost` if running on the same VM.
 
 ## Quick Start
 
 ```bash
-# From repo root — start the core stack first (FastAPI must be running)
+# From monitoring_pipeline/
 docker compose up -d
 
-# Then start monitoring stack
-cd monitoring_pipeline
-docker compose up -d
-
-# Verify all containers are up
+# Verify
 docker compose ps
 ```
 
@@ -49,18 +30,22 @@ docker compose ps
 |---|---|---|
 | Prometheus | http://localhost:9090 | — |
 | Grafana | http://localhost:3000 | admin / admin |
-| Streamlit | http://localhost:8501 | — |
 
----
+FastAPI itself runs as a systemd service (not Docker). See `serving_pipeline/README.md` for deployment details.
+
+To access Grafana from your local machine without opening firewall ports:
+```bash
+gcloud compute ssh kkbox-serving --zone=asia-southeast1-b -- -L 3000:localhost:3000
+```
+Then open http://localhost:3000.
 
 ## Prometheus
 
 ### Scrape target
 
-`prometheus.yml` scrapes `http://api_serving:8000/metrics` every 15s.  
-The target name `api_serving` resolves via Docker's internal DNS on `churn-network`.
+`prometheus.yml` scrapes `http://localhost:8000/metrics` every 15s (same VM).
 
-To verify scraping is working:
+To verify scraping:
 1. Open http://localhost:9090/targets
 2. `kkbox_serving_api` should show **UP**
 
@@ -78,15 +63,11 @@ To verify scraping is working:
 | `serving_feast_online_fetch_total` | Counter | status (success/error) | Feast Redis lookups |
 | `serving_feast_online_fetch_duration_seconds` | Histogram | status | Feast lookup latency |
 
----
-
 ## Grafana Dashboards
 
 Grafana auto-provisions the Prometheus datasource on startup via `grafana/provisioning/datasources/prometheus.yml`. No manual setup needed.
 
 ### Dashboard 1 — API Health
-
-Build this dashboard at http://localhost:3000 with the panels below.
 
 **Panel: Request Rate (RPS)**
 ```promql
@@ -146,87 +127,28 @@ After building dashboards in the UI:
 2. Save to `monitoring_pipeline/grafana/dashboards/<name>.json`
 3. Grafana auto-loads JSON files from that directory on restart
 
----
+## File Structure
 
-## Streamlit Dashboard
-
-Business-facing dashboard for non-technical users.
-
-**Features:**
-- **Single prediction**: Enter an `msno` → get churn probability + label
-- **Batch prediction**: Upload CSV with `msno` column → download results CSV + see score distribution chart
-
-**Environment variable:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `FASTAPI_URL` | `http://localhost:8000` | FastAPI base URL |
-
-Inside Docker the value should be `http://api_serving:8000` (set in `docker-compose.yml`).
-
----
-
-## Deployment on GCE VM
-
-The monitoring stack runs on the same VM as the core stack (or a separate VM in the same VPC).
-
-### Same VM (recommended for single-node)
-
-```bash
-# Core stack already running
-docker compose up -d          # from repo root
-
-# Start monitoring
-cd monitoring_pipeline
-docker compose up -d
+```
+monitoring_pipeline/
+├── docker-compose.yml          -- Prometheus + Grafana
+├── prometheus.yml              -- Scrape config
+└── grafana/
+    ├── provisioning/
+    │   └── datasources/
+    │       └── prometheus.yml  -- Auto-provision Prometheus datasource
+    └── dashboards/             -- Dashboard JSON files (committed here)
 ```
 
-### Separate VM
+## Business Dashboard
 
-If running on a dedicated monitoring VM, the `api_serving` container won't be reachable by name.  
-Update `prometheus.yml` to use the core VM's internal IP:
+The React dashboard at http://35.198.232.66/ui/ replaces the previous Streamlit dashboard. It is served directly by FastAPI and requires no separate deployment.
 
-```yaml
-static_configs:
-  - targets: ["<CORE_VM_INTERNAL_IP>:8000"]
-```
-
-Also set `FASTAPI_URL=http://<CORE_VM_INTERNAL_IP>:8000` in the Streamlit service environment.
-
-### Firewall rules (GCP)
-
-Open these ports on the VM's firewall tag if accessing from outside the VPC:
-
-| Port | Service | Recommended access |
-|---|---|---|
-| 3000 | Grafana | Your IP only (IAP tunnel preferred) |
-| 8501 | Streamlit | Your IP only |
-| 9090 | Prometheus | Internal VPC only |
-
-```bash
-# Example: allow Grafana from your IP
-gcloud compute firewall-rules create allow-grafana \
-  --allow tcp:3000 \
-  --source-ranges <YOUR_IP>/32 \
-  --target-tags monitoring-vm
-```
-
-Using IAP tunnel (no firewall rule needed):
-```bash
-gcloud compute ssh <VM_NAME> --zone=<ZONE> -- -L 3000:localhost:3000 -L 8501:localhost:8501
-```
-Then open http://localhost:3000 and http://localhost:8501 locally.
-
----
-
-## Checklist
-
-- [ ] Core stack running (`docker compose ps` shows `api_serving` Up)
-- [ ] `docker compose up -d` in `monitoring_pipeline/` succeeds
-- [ ] Prometheus target `kkbox_serving_api` shows UP at http://localhost:9090/targets
-- [ ] Grafana datasource Prometheus shows green at http://localhost:3000/datasources
-- [ ] Dashboard 1 (API Health) created and panels returning data
-- [ ] Dashboard 2 (Churn Prediction) created and panels returning data
-- [ ] Streamlit single prediction working
-- [ ] Streamlit batch prediction working
-- [ ] Dashboard JSONs committed to `grafana/dashboards/`
+| Page | Description |
+|------|-------------|
+| Single User | Predict churn + SHAP explanation for one msno |
+| Batch Prediction | Upload CSV → score all users, download results |
+| Statistics | Cumulative prediction counts, churn rate |
+| Streaming Simulation | Replay March 2017 data, date chips, user list, predict |
+| Model Info | Metrics, ROC curve, feature importance |
+| API Health | Service status, endpoint latency |
