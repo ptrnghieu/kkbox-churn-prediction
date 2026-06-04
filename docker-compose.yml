@@ -19,6 +19,12 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      # Retain messages for 1 hour max, or 2 GB per topic — whichever comes first.
+      # Each simulation replay writes ~1.5 GB; without these limits Kafka fills
+      # the disk across repeated runs (default retention is 7 days / unlimited).
+      KAFKA_LOG_RETENTION_MS: 3600000
+      KAFKA_LOG_RETENTION_BYTES: 2147483648
+      KAFKA_LOG_SEGMENT_BYTES: 536870912
     networks:
       - churn-network
 

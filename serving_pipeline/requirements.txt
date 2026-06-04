@@ -13,3 +13,5 @@ python-dotenv
 prometheus_client
 shap
 redis
+scipy
+pandas-gbq
