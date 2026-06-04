@@ -157,6 +157,12 @@ async def run_drift_check(date_str: str) -> None:
         logger.error("Drift check failed for %s: %s", date_str, exc)
 
 
+def clear() -> None:
+    """Reset drift results — called when streaming simulation is stopped/restarted."""
+    _drift_results.clear()
+    logger.info("Drift results cleared")
+
+
 # ── API endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("/drift")

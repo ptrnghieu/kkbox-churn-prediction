@@ -202,6 +202,7 @@ async def stream_stop() -> dict:
                    "current_date": None, "dates_done": []})
     _date_users.clear()
     feature_cache.clear()
+    _drift.clear()
     await _broadcast("status", {"status": "idle"})
     return {"status": "stopped"}
 
