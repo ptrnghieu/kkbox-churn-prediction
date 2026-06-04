@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 860" font-family="Arial, Helvetica, sans-serif" style="background:#fff">
+<defs>
+  <marker id="arr" markerWidth="9" markerHeight="7"
+          refX="8" refY="3.5" orient="auto">
+    <polygon points="0 0,9 3.5,0 7" fill="#2a2a2a"/>
+  </marker>
+  <marker id="arr-lt" markerWidth="9" markerHeight="7"
+          refX="8" refY="3.5" orient="auto">
+    <polygon points="0 0,9 3.5,0 7" fill="#888888"/>
+  </marker>
+  <marker id="arr-blue" markerWidth="9" markerHeight="7"
+          refX="8" refY="3.5" orient="auto">
+    <polygon points="0 0,9 3.5,0 7" fill="#1565c0"/>
+  </marker>
+</defs><text x="400" y="26" text-anchor="middle" font-size="14" font-weight="bold" fill="#111111">Serving Pipeline — Detailed Architecture</text>
+<text x="400" y="42" text-anchor="middle" font-size="10" font-weight="normal" fill="#555555">Server Startup · Online Prediction · Streaming Simulation Controller</text>
+<rect x="20" y="52" width="760" height="140" rx="8" fill="#f9f9f9" stroke="#aaaaaa" stroke-width="1" stroke-dasharray="6,3"/>
+<text x="28" y="65" font-size="10" font-weight="bold" fill="#777777" text-transform="uppercase">Flow A — Server Startup  (uvicorn start)</text>
+<rect x="36" y="70" width="148" height="52" rx="5" fill="#fff8e1" stroke="#c8a200" stroke-width="1.5" opacity="1"/>
+<text x="110" y="84" text-anchor="middle" font-size="10" font-weight="bold" fill="#111111">GCS  model.ubj</text>
+<text x="110" y="97" text-anchor="middle" font-size="10" font-weight="bold" fill="#111111">preprocessing</text>
+<text x="110" y="110" text-anchor="middle" font-size="10" font-weight="bold" fill="#111111">_config.json</text>
+<text x="110" y="122" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">feature_cols.json</text>
+<rect x="202" y="70" width="148" height="52" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="276" y="84" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Load Model</text>
+<text x="276" y="98" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">XGBClassifier()</text>
+<text x="276" y="110" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">model.load_model(tmp)</text>
+<text x="276" y="122" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">json config &amp; feature list</text>
+<rect x="368" y="70" width="180" height="52" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="458" y="84" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">SHAP TreeExplainer</text>
+<text x="458" y="98" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">shap.TreeExplainer(model)</text>
+<text x="458" y="110" text-anchor="middle" font-size="9" font-weight="bold" fill="#1b5e20">initialized ONCE at startup</text>
+<text x="458" y="122" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">reused for all requests</text>
+<rect x="566" y="70" width="198" height="52" rx="5" fill="#e8f4f8" stroke="#0d47a1" stroke-width="2" opacity="1"/>
+<text x="665" y="84" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">PredictionService</text>
+<text x="665" y="98" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">singleton, lazy init</text>
+<text x="665" y="110" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">FeatureStore(Redis)</text>
+<text x="665" y="122" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">feature_refs (18 Feast refs)</text>
+<rect x="36" y="136" width="728" height="44" rx="5" fill="#f9fbe7" stroke="#888888" stroke-width="1.5" opacity="1"/>
+<text x="400" y="153" text-anchor="middle" font-size="9" font-weight="normal" fill="#777777" font-family="Courier New, Courier, monospace">fastapi lifespan event → PredictionService.__init__()  →  startup completes in ~15-30s</text>
+<text x="400" y="167" text-anchor="middle" font-size="9" font-weight="normal" fill="#777777">Kafka subprocess manager (stream.py) also registers on startup</text>
+<rect x="20" y="210" width="760" height="248" rx="8" fill="#f9f9f9" stroke="#aaaaaa" stroke-width="1" stroke-dasharray="6,3"/>
+<text x="28" y="223" font-size="10" font-weight="bold" fill="#777777" text-transform="uppercase">Flow B — Online Prediction Request  POST /predict/</text>
+<rect x="36" y="228" width="100" height="40" rx="5" fill="#fce4ec" stroke="#880e4f" stroke-width="1.5" opacity="1"/>
+<text x="86" y="244" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Client</text>
+<text x="86" y="256" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">POST /predict/</text>
+<rect x="154" y="228" width="140" height="40" rx="5" fill="#e8f4f8" stroke="#1565c0" stroke-width="1.5" opacity="1"/>
+<text x="224" y="244" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Feast Online Fetch</text>
+<text x="224" y="256" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">get_online_features(msno)</text>
+<rect x="312" y="228" width="100" height="40" rx="5" fill="#e8f5e9" stroke="#388e3c" stroke-width="1.5" opacity="1"/>
+<text x="362" y="244" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Redis</text>
+<text x="362" y="256" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">10.80.68.19:6379</text>
+<rect x="430" y="228" width="160" height="40" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="510" y="244" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Preprocess</text>
+<text x="510" y="256" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">_preprocess(features, cfg)</text>
+<rect x="608" y="228" width="136" height="40" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="676" y="244" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">XGBoost Infer</text>
+<text x="676" y="256" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">predict_proba(X)[0,1]</text>
+<rect x="36" y="290" width="368" height="56" rx="5" fill="#fff3e0" stroke="#e65100" stroke-width="1.5" opacity="1"/>
+<text x="220" y="305" text-anchor="middle" font-size="11" font-weight="bold" fill="#bf360c">Cold-start: member_found = False  (user not in Redis)</text>
+<text x="220" y="320" text-anchor="middle" font-size="9" font-weight="normal" fill="#c62828" font-family="Courier New, Courier, monospace">Zero imputation:   x_cold = 0   → churn_prob ≈ 0.71  (wrong)</text>
+<text x="220" y="334" text-anchor="middle" font-size="9" font-weight="bold" fill="#2e7d32" font-family="Courier New, Courier, monospace">Median imputation: x_cold = median(training)  → churn_prob ≈ 0.34  ✓</text>
+<rect x="420" y="290" width="164" height="56" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="502" y="306" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">SHAP Explanation</text>
+<text x="502" y="321" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">explainer.shap_values(X)</text>
+<text x="502" y="333" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">top-3 positive SHAP</text>
+<text x="502" y="345" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">→ human-readable reasons</text>
+<rect x="600" y="290" width="164" height="56" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="682" y="306" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Threshold Decision</text>
+<text x="682" y="321" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">prob ≥ 0.781 → is_churn=1</text>
+<text x="682" y="333" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">env: CHURN_THRESHOLD</text>
+<text x="682" y="345" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">configurable, no retrain</text>
+<rect x="36" y="368" width="728" height="76" rx="5" fill="#e8f4f8" stroke="#1565c0" stroke-width="1.5" opacity="1"/>
+<text x="400" y="384" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Response  (JSON)</text>
+<text x="400" y="396" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">churn_probability: 0.84  ·  is_churn: 1  ·  member_found: true</text>
+<text x="400" y="409" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">reasons: ["Khách hàng đã hủy gói nhiều lần", "Ít ngày hoạt động", ...]</text>
+<text x="400" y="422" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">feature_timestamp: "2017-03-05"</text>
+<rect x="20" y="476" width="760" height="320" rx="8" fill="#f9f9f9" stroke="#aaaaaa" stroke-width="1" stroke-dasharray="6,3"/>
+<text x="28" y="489" font-size="10" font-weight="bold" fill="#777777" text-transform="uppercase">Flow C — Streaming Simulation Controller  (app/stream.py)</text>
+<rect x="36" y="494" width="140" height="44" rx="5" fill="#fce4ec" stroke="#880e4f" stroke-width="1.5" opacity="1"/>
+<text x="106" y="510" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Dashboard</text>
+<text x="106" y="522" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">POST /stream/start</text>
+<text x="106" y="534" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">{ speed: 55 }</text>
+<rect x="196" y="494" width="176" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="284" y="510" text-anchor="middle" font-size="10" font-weight="bold" fill="#111111" font-family="Courier New, Courier, monospace">_kill_stale_workers()</text>
+<text x="284" y="522" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">pkill -f kafka_producer.py</text>
+<text x="284" y="534" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">pkill -f kafka_consumer.py</text>
+<rect x="390" y="494" width="192" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="486" y="510" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">① Spawn Consumer</text>
+<text x="486" y="522" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">offset_reset=latest</text>
+<text x="486" y="534" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">consumer.poll() → lock offset</text>
+<rect x="600" y="494" width="164" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="682" y="510" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">await sleep(20s)</text>
+<text x="682" y="522" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">consumer joins Kafka group</text>
+<text x="682" y="534" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">offset committed</text>
+<rect x="390" y="556" width="192" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="486" y="572" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">② Spawn Producer</text>
+<text x="486" y="584" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">--speed 55 (s/day)</text>
+<text x="486" y="596" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">GCS → Kafka replay begins</text>
+<rect x="36" y="556" width="340" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="206" y="572" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Pause / Resume</text>
+<text x="206" y="584" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">SIGSTOP → producer (consumer still runs)</text>
+<text x="206" y="596" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">SIGCONT → resume producer</text>
+<rect x="600" y="556" width="164" height="44" rx="5" fill="#f2f2f2" stroke="#2a2a2a" stroke-width="1.5" opacity="1"/>
+<text x="682" y="572" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">Stop</text>
+<text x="682" y="584" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">SIGTERM producer + consumer</text>
+<text x="682" y="596" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">reset all state</text>
+<rect x="36" y="620" width="260" height="56" rx="5" fill="#fff3e0" stroke="#e65100" stroke-width="1.5" opacity="1"/>
+<text x="166" y="636" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">POST /stream/notify  (from consumer)</text>
+<text x="166" y="650" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">date + [msno, ...]  →  update _state</text>
+<text x="166" y="662" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">feature_cache.update(date, msnos)</text>
+<rect x="312" y="620" width="212" height="56" rx="5" fill="#e8f4f8" stroke="#1565c0" stroke-width="1.5" opacity="1"/>
+<text x="418" y="636" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">SSE Broadcast</text>
+<text x="418" y="650" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">event: date_done</text>
+<text x="418" y="662" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">data: {date, user_count, dates_done}</text>
+<rect x="540" y="620" width="244" height="56" rx="5" fill="#fce4ec" stroke="#880e4f" stroke-width="1.5" opacity="1"/>
+<text x="662" y="636" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">React Dashboard /ui/</text>
+<text x="662" y="650" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">date chip appears  →  user list</text>
+<text x="662" y="662" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">predict button  →  POST /predict/</text>
+<rect x="36" y="694" width="748" height="88" rx="5" fill="#f8f8f8" stroke="#888888" stroke-width="1.5" opacity="1"/>
+<text x="400" y="710" text-anchor="middle" font-size="11" font-weight="bold" fill="#111111">GET /stream/events  —  SSE Connection</text>
+<text x="400" y="726" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555">Initial event on connect:  event: status</text>
+<text x="400" y="738" text-anchor="middle" font-size="9" font-weight="normal" fill="#555555" font-family="Courier New, Courier, monospace">data: {"status": ..., "current_date": ..., "dates_list": [...all completed dates...]}</text>
+<text x="400" y="750" text-anchor="middle" font-size="9" font-weight="normal" fill="#777777">→ UI restores full state on reconnect / tab switch  ·  keepalive comment every 20s</text>
+<text x="400" y="764" text-anchor="middle" font-size="9" font-weight="bold" fill="#1b5e20">All 6 pages mounted simultaneously with CSS display:none/block  →  SSE connection preserved across tab switches</text>
+<line x1="110" y1="70" x2="202" y2="96" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="276" y1="122" x2="368" y2="96" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="566" y1="96" x2="458" y2="122" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="136" y1="248" x2="154" y2="248" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="294" y1="248" x2="312" y2="248" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="412" y1="248" x2="430" y2="248" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="590" y1="248" x2="608" y2="248" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="676" y1="268" x2="676" y2="290" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="510" y1="268" x2="502" y2="290" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="600" y1="318" x2="502" y2="318" stroke="#2a2a2a" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arr)"/>
+<path d="M 220 268 L 220 290" fill="none" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="176" y1="516" x2="196" y2="516" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="372" y1="516" x2="390" y2="516" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="682" y1="538" x2="682" y2="556" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="600" y1="556" x2="582" y2="578" stroke="#2a2a2a" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arr)"/>
+<line x1="166" y1="600" x2="166" y2="620" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="296" y1="648" x2="312" y2="648" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="524" y1="648" x2="540" y2="648" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="486" y1="600" x2="486" y2="620" stroke="#2a2a2a" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arr)"/>
+</svg>

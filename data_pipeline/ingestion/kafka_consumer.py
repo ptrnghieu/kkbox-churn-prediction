@@ -366,27 +366,27 @@ def consume(bootstrap_servers: str, dry_run: bool,
                 msno = record.get("msno")
                 if date and msno:
                     logs_by_date[date][msno].append(record)
+                    current_date = date
             elif topic == TOPIC_TRANSACTIONS:
                 date = record.get("transaction_date", "")[:10]
                 msno = record.get("msno")
                 if date and msno:
                     txns_by_date[date][msno].append(record)
+                    current_date = date
             else:
                 continue
-
-            # Fallback: flush previous date when a new date is detected
-            if current_date and date != current_date and current_date not in flushed_dates:
-                flush(current_date)
-
-            current_date = date
 
     except Exception as e:
         log.error("Consumer error: %s", e)
         raise
     finally:
-        # Flush remaining buffer
-        if current_date and current_date not in flushed_dates:
-            flush(current_date)
+        # Flush any dates that never received both EOD markers (e.g. on shutdown)
+        remaining = sorted(
+            (set(logs_by_date) | set(txns_by_date)) - flushed_dates
+        )
+        for d in remaining:
+            log.warning("Flushing date %s on shutdown (EOD markers may not have arrived)", d)
+            flush(d)
         # Wait for background BQ/Feast work to finish, then stop worker
         _bg_queue.join()
         _bg_queue.put(None)
