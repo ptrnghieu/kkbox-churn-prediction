@@ -243,6 +243,7 @@
       { id: 'batch',    label: 'Batch Prediction',  icon: '📦', sub: 'CSV bulk scoring'         },
       { id: 'stats',    label: 'Statistics',         icon: '📈', sub: 'Prediction counts'        },
       { id: 'stream',   label: 'Streaming',          icon: '⏱',  sub: 'Historical replay'        },
+      { id: 'drift',    label: 'Drift Detection',    icon: '📡', sub: 'PSI + KS feature drift'   },
       { id: 'model',    label: 'Model Info',         icon: '🤖', sub: 'XGBoost performance'      },
       { id: 'health',   label: 'API Health',         icon: '💚', sub: 'Service status'           },
     ];
@@ -252,6 +253,7 @@
       batch:   { title: 'Batch Prediction',      sub: 'Score multiple users at once from a CSV file.' },
       stats:   { title: 'Statistics',            sub: 'Cumulative prediction counts since the API last started.' },
       stream:  { title: 'Streaming Simulation',  sub: 'Replay March 2017 data through the full pipeline. Click any user to predict.' },
+      drift:   { title: 'Drift Detection',       sub: 'PSI and KS test — compare streaming feature distributions vs training baseline.' },
       model:   { title: 'Model Info',            sub: 'XGBoost classifier — performance metrics, ROC curve, and feature importance.' },
       health:  { title: 'API Health',            sub: 'Live status of serving infrastructure and endpoints.' },
     };
@@ -337,6 +339,7 @@
       { id: 'batch',  Comp: BatchPage },
       { id: 'stats',  Comp: StatisticsPage },
       { id: 'stream', Comp: StreamingPage },
+      { id: 'drift',  Comp: DriftPage },
       { id: 'model',  Comp: ModelInfoPage },
       { id: 'health', Comp: APIHealthPage },
     ];

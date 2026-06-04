@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import feature_cache
+import app.drift as _drift
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Streaming"])
@@ -219,7 +220,14 @@ async def stream_notify(req: NotifyRequest) -> dict:
         "user_count": len(req.msnos),
         "dates_done": len(_state["dates_done"]),
     })
+    # Schedule drift check ~90s later (BQ write + Feast materialize must finish first)
+    asyncio.create_task(_schedule_drift(req.date))
     return {"ok": True}
+
+
+async def _schedule_drift(date_str: str) -> None:
+    await asyncio.sleep(90)
+    await _drift.run_drift_check(date_str)
 
 
 @router.get("/status")

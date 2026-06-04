@@ -17,6 +17,7 @@ from app import stats_store
 from app.predict import router as predict_router
 from app.explain import router as explain_router
 from app.stream import router as stream_router
+from app.drift import router as drift_router
 
 app = FastAPI(
     title="KKBox Churn Prediction API",
@@ -108,6 +109,7 @@ def metrics():
 app.include_router(predict_router, prefix="/predict")
 app.include_router(explain_router, prefix="/explain")
 app.include_router(stream_router, prefix="/stream")
+app.include_router(drift_router)
 
 # Serve the React dashboard from /ui — must be mounted after API routes
 _static_dir = os.path.join(os.path.dirname(__file__), "..", "static")

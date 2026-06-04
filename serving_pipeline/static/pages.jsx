@@ -904,4 +904,204 @@ function StreamingPage({ apiUrl = '', onSelectMsno }) {
   );
 }
 
-Object.assign(window, { SingleUserPage, BatchPage, StatisticsPage, ModelInfoPage, APIHealthPage, StreamingPage });
+// ─── Drift Detection Page ─────────────────────────────────────────────────────
+const FEAT_LABELS = {
+  total_transactions: 'Total Transactions',  total_amount_paid: 'Total Amount Paid',
+  avg_amount_paid:    'Avg Amount Paid',      auto_renew_count:  'Auto Renewals',
+  cancel_count:       'Cancellations',        total_log_days:    'Log Days',
+  total_secs:         'Total Listen (secs)',  avg_daily_secs:    'Avg Daily Secs',
+  total_num_25:       'Plays >25%',           total_num_50:      'Plays >50%',
+  total_num_75:       'Plays >75%',           total_num_985:     'Plays >98.5%',
+  total_num_100:      'Plays 100%',           total_num_unq:     'Unique Songs',
+};
+
+function PsiBadge({ level }) {
+  const cfg = {
+    stable:   { bg: '#f0fdf4', color: '#16a34a', bd: '#bbf7d0', label: 'Stable'   },
+    warning:  { bg: '#fffbeb', color: '#d97706', bd: '#fde68a', label: 'Warning'  },
+    critical: { bg: '#fef2f2', color: '#dc2626', bd: '#fecaca', label: 'Critical' },
+    pending:  { bg: '#f3f4f6', color: '#9ca3af', bd: '#e5e7eb', label: 'Pending'  },
+  }[level] || { bg: '#f3f4f6', color: '#9ca3af', bd: '#e5e7eb', label: level };
+  return (
+    <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700,
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.bd}` }}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function PsiBar({ psi }) {
+  const pct = Math.min(psi / 0.4, 1) * 100;
+  const color = psi < 0.1 ? '#4ade80' : psi < 0.25 ? '#fbbf24' : '#f87171';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, background: '#f3f4f6', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+        <div style={{ height: '100%', borderRadius: 4, width: `${pct}%`, background: color, transition: 'width 0.4s' }} />
+      </div>
+      <span style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums', color: '#374151', minWidth: 40, textAlign: 'right' }}>
+        {psi.toFixed(4)}
+      </span>
+    </div>
+  );
+}
+
+function DriftPage({ apiUrl = '' }) {
+  const [summary, setSummary] = useState({});
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [age, setAge] = useState(0);
+
+  const fetchSummary = async () => {
+    try {
+      const d = await apiGet(apiUrl, '/drift');
+      setSummary(d.dates || {});
+      setLastUpdated(Date.now());
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchSummary();
+    const id = setInterval(fetchSummary, 15000);
+    return () => clearInterval(id);
+  }, [apiUrl]);
+
+  useEffect(() => {
+    const id = setInterval(() => { if (lastUpdated) setAge(Math.floor((Date.now() - lastUpdated) / 1000)); }, 1000);
+    return () => clearInterval(id);
+  }, [lastUpdated]);
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    setLoadingDetail(true); setDetail(null);
+    apiGet(apiUrl, `/drift/${selectedDate}`)
+      .then(d => setDetail(d))
+      .catch(() => setDetail(null))
+      .finally(() => setLoadingDetail(false));
+  }, [selectedDate, apiUrl]);
+
+  const dates = Object.keys(summary).sort();
+  const nDates = dates.length;
+  const nWarning  = Object.values(summary).filter(d => d.level === 'warning').length;
+  const nCritical = Object.values(summary).filter(d => d.level === 'critical').length;
+
+  const features = detail?.features ? Object.entries(detail.features)
+    .sort((a, b) => b[1].psi - a[1].psi) : [];
+
+  return (
+    <div>
+      {/* Header stats */}
+      <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', marginBottom: '1.25rem' }}>
+        <StatBox value={nDates} label="Dates Checked" />
+        <StatBox value={nWarning} label="Warning (PSI 0.1–0.25)" variant={nWarning > 0 ? 'danger' : ''} />
+        <StatBox value={nCritical} label="Critical (PSI ≥ 0.25)" variant={nCritical > 0 ? 'danger' : ''} />
+      </div>
+
+      <div className="two-col" style={{ alignItems: 'start' }}>
+
+        {/* Date list */}
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+            <CardTitle>Dates ({nDates})</CardTitle>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#9ca3af' }}>
+              {lastUpdated ? `${age}s ago` : 'Loading…'}
+              <button className="btn btn-secondary" style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem' }} onClick={fetchSummary}>↻</button>
+            </div>
+          </div>
+
+          {nDates === 0 ? (
+            <div className="empty-state" style={{ minHeight: 120 }}>
+              <span style={{ fontSize: '0.82rem' }}>No drift checks yet — start streaming simulation first</span>
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead><tr><th>Date</th><th>Max PSI</th><th>Status</th><th>Warn</th><th>Crit</th></tr></thead>
+              <tbody>
+                {dates.map(d => {
+                  const r = summary[d];
+                  return (
+                    <tr key={d} onClick={() => setSelectedDate(d)}
+                      style={{ cursor: 'pointer', background: selectedDate === d ? 'rgba(207,111,60,0.07)' : undefined }}>
+                      <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: selectedDate === d ? '#CF6F3C' : undefined, fontWeight: selectedDate === d ? 600 : undefined }}>{d}</td>
+                      <td style={{ fontFamily: 'monospace' }}>{r.max_psi?.toFixed(4) ?? '—'}</td>
+                      <td><PsiBadge level={r.level} /></td>
+                      <td style={{ color: r.n_warning > 0 ? '#d97706' : '#9ca3af' }}>{r.n_warning}</td>
+                      <td style={{ color: r.n_critical > 0 ? '#dc2626' : '#9ca3af' }}>{r.n_critical}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Feature detail */}
+        <div className="card">
+          <CardTitle>{selectedDate ? `Feature Drift — ${selectedDate}` : 'Select a date →'}</CardTitle>
+
+          {!selectedDate && (
+            <div className="empty-state" style={{ minHeight: 160 }}>
+              <span style={{ fontSize: '0.82rem' }}>Click a date on the left to see per-feature drift</span>
+            </div>
+          )}
+
+          {selectedDate && loadingDetail && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}><Spinner /></div>
+          )}
+
+          {selectedDate && detail?.status === 'pending' && !loadingDetail && (
+            <div className="empty-state" style={{ minHeight: 120 }}>
+              <span style={{ fontSize: '0.82rem' }}>Drift check scheduled — results in ~90s after streaming day completes</span>
+            </div>
+          )}
+
+          {selectedDate && detail?.status === 'done' && features.length > 0 && (
+            <>
+              <div style={{ display: 'flex', gap: 16, marginBottom: '0.75rem', fontSize: '0.72rem', color: '#9ca3af' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, background: '#4ade80', borderRadius: 2, display: 'inline-block' }} />PSI &lt; 0.10 Stable
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, background: '#fbbf24', borderRadius: 2, display: 'inline-block' }} />0.10–0.25 Warning
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, background: '#f87171', borderRadius: 2, display: 'inline-block' }} />≥ 0.25 Critical
+                </span>
+              </div>
+              <div style={{ overflowY: 'auto', maxHeight: 400 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr><th>Feature</th><th style={{ minWidth: 160 }}>PSI</th><th>KS Stat</th><th>p-value</th><th>Drift?</th></tr>
+                  </thead>
+                  <tbody>
+                    {features.map(([feat, info]) => (
+                      <tr key={feat}>
+                        <td style={{ fontSize: '0.78rem', color: '#374151' }}>{FEAT_LABELS[feat] || feat}</td>
+                        <td><PsiBar psi={info.psi} /></td>
+                        <td style={{ fontFamily: 'monospace', color: '#6b7280' }}>{info.ks_stat?.toFixed(4)}</td>
+                        <td style={{ fontFamily: 'monospace', color: info.ks_pvalue < 0.05 ? '#dc2626' : '#9ca3af' }}>
+                          {info.ks_pvalue?.toFixed(5)}
+                        </td>
+                        <td>
+                          {info.ks_drift
+                            ? <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 700 }}>Yes</span>
+                            : <span style={{ fontSize: '0.75rem', color: '#16a34a' }}>No</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: '0.75rem', fontSize: '0.72rem', color: '#9ca3af' }}>
+                PSI vs training baseline (features_train). KS p-value &lt; 0.05 = statistically significant drift.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { SingleUserPage, BatchPage, StatisticsPage, ModelInfoPage, APIHealthPage, StreamingPage, DriftPage });
