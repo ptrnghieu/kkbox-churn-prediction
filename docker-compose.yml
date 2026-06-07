@@ -4,6 +4,7 @@ services:
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
+    restart: always
     ports:
       - "9092:9092"
       - "9093:9093"
@@ -30,12 +31,14 @@ services:
 
   redis:
     image: redis:7.2-alpine
+    restart: always
     ports: ["6379:6379"]
     networks:
       - churn-network
 
   feast:
     build: ./feature_store
+    restart: always
     depends_on: [redis, kafka]
     env_file: ./.env
     volumes:
@@ -50,6 +53,7 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     container_name: mlflow_server
+    restart: always
     ports:
       - "5000:5000"
     environment:
@@ -77,6 +81,7 @@ services:
       - ./feature_store:/app/feature_store
     networks:
       - churn-network
+    profiles: ["docker-only"]
 
 networks:
   churn-network:
