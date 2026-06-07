@@ -945,7 +945,7 @@ function PsiBar({ psi }) {
   );
 }
 
-function DriftPage({ apiUrl = '' }) {
+function DriftPage({ apiUrl = '', visible = true }) {
   const [summary, setSummary] = useState({});
   const [selectedDate, setSelectedDate] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -962,10 +962,11 @@ function DriftPage({ apiUrl = '' }) {
   };
 
   useEffect(() => {
+    if (!visible) return;
     fetchSummary();
     const id = setInterval(fetchSummary, 15000);
     return () => clearInterval(id);
-  }, [apiUrl]);
+  }, [apiUrl, visible]);
 
   useEffect(() => {
     const id = setInterval(() => { if (lastUpdated) setAge(Math.floor((Date.now() - lastUpdated) / 1000)); }, 1000);
@@ -973,13 +974,13 @@ function DriftPage({ apiUrl = '' }) {
   }, [lastUpdated]);
 
   useEffect(() => {
-    if (!selectedDate) return;
+    if (!selectedDate || !visible) return;
     setLoadingDetail(true); setDetail(null);
     apiGet(apiUrl, `/drift/${selectedDate}`)
       .then(d => setDetail(d))
       .catch(() => setDetail(null))
       .finally(() => setLoadingDetail(false));
-  }, [selectedDate, apiUrl]);
+  }, [selectedDate, apiUrl, visible]);
 
   const dates = Object.keys(summary).sort();
   const nDates = dates.length;

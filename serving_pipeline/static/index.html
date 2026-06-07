@@ -378,6 +378,7 @@
                 <div key={id} style={{ display: page === id ? 'block' : 'none' }}>
                   <Comp
                     apiUrl={t.apiUrl}
+                    visible={page === id}
                     selectedMsno={id === 'single' ? selectedMsno : undefined}
                     onSelectMsno={handleSelectMsno}
                   />

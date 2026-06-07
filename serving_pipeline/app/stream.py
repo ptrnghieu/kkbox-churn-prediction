@@ -121,6 +121,7 @@ async def stream_start(req: StartRequest) -> dict:
     })
     _date_users.clear()
     feature_cache.clear()
+    _drift.clear()
 
     group_id = f"kkbox-stream-{int(time.time())}"
     env = {**os.environ,
@@ -202,6 +203,7 @@ async def stream_stop() -> dict:
                    "current_date": None, "dates_done": []})
     _date_users.clear()
     feature_cache.clear()
+    _drift.clear()
     await _broadcast("status", {"status": "idle"})
     return {"status": "stopped"}
 
