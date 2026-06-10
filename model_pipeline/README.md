@@ -1,13 +1,6 @@
 # Model Pipeline
 
-Training pipeline cho XGBoost churn prediction model: đọc features từ BigQuery Gold, train, track experiments qua MLflow, và upload model artifacts lên GCS.
-
-## Responsibilities
-
-- Train XGBoost model với out-of-time validation trên dữ liệu BigQuery Gold
-- Track experiments và metrics bằng MLflow
-- Upload model artifact, preprocessing config, và feature column list lên GCS
-- Cung cấp script riêng để regenerate preprocessing config mà không cần retrain
+Training pipeline cho XGBoost churn prediction model: đọc features từ BigQuery Gold, train với out-of-time validation, track experiments qua MLflow, và upload model artifacts lên GCS.
 
 ## File Structure
 
@@ -16,32 +9,41 @@ model_pipeline/
 └── training/
     ├── train.py                        -- Main training script
     └── update_preprocessing_config.py  -- Regenerate preprocessing_config.json từ BQ
+
+feature_store/                          -- Dùng chung cho training và serving
+├── feature_store.yaml
+├── entities.py
+└── feature_views.py
 ```
 
-Feature store definitions nằm ở `feature_store/` (root level — dùng chung cho cả training và serving):
+## Training Pipeline
 
-```
-feature_store/
-├── feature_store.yaml   -- Feast config (GCP provider, BigQuery offline, Redis online)
-├── entities.py          -- Entity: msno (user ID)
-└── feature_views.py     -- Feature view: 18 features từ kkbox_gold.features_train
+```mermaid
+flowchart TD
+    BQ["BigQuery Gold\nkkbox_gold.features_train\n~1.08M rows"]
+    SP["Out-of-time Split\ntrain: reg < 2016-06-01\ntest: reg >= 2016-06-01"]
+    PP["Preprocessing\ngender encoding\nnull imputation"]
+    TR["XGBoost Training\nn_estimators, max_depth\nlearning_rate, scale_pos_weight"]
+    EV["Evaluation\nAUC-ROC, AUC-PR, F1\noptimal threshold"]
+    ML["MLflow\nlog params + metrics\nlog model artifact"]
+    GCS["GCS\nmodel.ubj\npreprocessing_config.json\nfeature_cols.json"]
+
+    BQ --> SP --> PP --> TR --> EV --> ML
+    TR --> GCS
 ```
 
-## Data
+## Data & Split Strategy
 
 **Source:** `kkbox-churn-prediction-493716.kkbox_gold.features_train`
 - ~1,082,190 rows, feature snapshot tính đến 2016-12-31
-- Target column: `is_churn`
-- Churn rate: ~10%
+- Target: `is_churn`, churn rate ~10%
 
-**Split strategy: out-of-time theo `registration_init_time`**
-
-| Split | Điều kiện | Số rows |
-|-------|-----------|---------|
+| Split | Điều kiện | Rows |
+|-------|-----------|------|
 | Train | `registration_init_time < 2016-06-01` | ~804k |
-| Test  | `registration_init_time >= 2016-06-01` | ~157k |
+| Test | `registration_init_time >= 2016-06-01` | ~157k |
 
-Out-of-time split phản ánh thực tế production: model được train trên user đăng ký sớm hơn, test trên user mới hơn.
+Out-of-time split phản ánh thực tế: model train trên user đăng ký trước, test trên user mới hơn.
 
 ## Features (18 features)
 
@@ -74,15 +76,15 @@ Out-of-time split phản ánh thực tế production: model được train trên
 | AUC-PR | 0.5044 |
 | F1 | 0.5068 |
 | Precision | 0.3593 |
-| Recall | 0.8596 |
+| Recall | **0.8596** |
 | Optimal threshold (F1-maximized) | **0.789** |
 
-Threshold mặc định trong serving là `0.781` (có thể override qua env var `CHURN_THRESHOLD`).
+Threshold mặc định trong serving là `0.781` (override qua env var `CHURN_THRESHOLD`).
 
 ## Run Training
 
 ```bash
-# Mặc định: đọc từ BigQuery, log vào MLflow local, upload model lên GCS
+# Mặc định: đọc BQ, log MLflow, upload GCS
 python model_pipeline/training/train.py
 
 # Tùy chỉnh hyperparameters
@@ -91,69 +93,56 @@ python model_pipeline/training/train.py \
   --max-depth 5 \
   --learning-rate 0.03
 
-# Xem tất cả options
 python model_pipeline/training/train.py --help
 ```
 
-Training đọc dữ liệu từ BigQuery, nên cần GCP credentials hợp lệ (`GOOGLE_APPLICATION_CREDENTIALS` hoặc ADC).
+Cần GCP credentials hợp lệ (`GOOGLE_APPLICATION_CREDENTIALS` hoặc ADC).
 
 ## GCS Model Artifacts
 
 ```
 gs://kkbox-churn-prediction-493716-data/models/kkbox-churn-xgboost/
-├── model.ubj                   -- XGBoost model (binary format)
+├── model.ubj                   -- XGBoost model (binary)
 ├── preprocessing_config.json   -- Medians/modes cho cold-start imputation
-└── feature_cols.json           -- Ordered list of 18 feature columns
+└── feature_cols.json           -- Ordered list của 18 feature columns
 ```
 
 `preprocessing_config.json` chứa:
-- `num_cols_medians`: median của từng numeric feature (dùng cho cold-start)
-- `num_cols_fill_zero`: list features được fill bằng median thay vì 0
+- `num_cols_medians`: median của từng numeric feature (dùng khi user không có data)
 - `bd_median`, `city_mode`, `registered_via_mode`: giá trị mặc định cho member features
 - `gender_map`: mapping string → int cho gender
 
-## Preprocessing Config
-
-`preprocessing_config.json` phục vụ **cold-start imputation**: khi một user chưa có features trong Redis (user mới hoặc chưa xuất hiện trong streaming), serving pipeline điền bằng population median thay vì số 0 — giúp model thấy một "average user" thay vì user hoàn toàn inactive.
+**Cold-start imputation:** user chưa có features trong Redis được fill bằng population median từ config này — model thấy "average user" thay vì user hoàn toàn inactive.
 
 ```bash
-# Regenerate config mà không retrain model
-# (dùng khi BQ data thay đổi nhưng không muốn retrain toàn bộ)
+# Regenerate preprocessing_config.json mà không retrain
 python model_pipeline/training/update_preprocessing_config.py
 ```
 
 ## Feast Feature Store
 
-Feature store dùng chung cho cả training (offline) và serving (online).
-
 ```bash
-# Apply definitions (tạo/update tables và online store schema)
+# Apply definitions (tạo/update schema)
 feast -c feature_store apply
 
-# Kiểm tra entities và feature views
+# Kiểm tra
 feast -c feature_store entities list
 feast -c feature_store feature-views list
 
-# Materialize features từ BQ vào Redis (online store)
+# Materialize thủ công (thường consumer làm tự động)
 feast -c feature_store materialize-incremental $(date -u +%Y-%m-%dT%H:%M:%S)
 ```
 
-Trong production, materialize chạy tự động trong background thread của kafka_consumer.py sau mỗi ngày dữ liệu mới.
+Trong production, materialize chạy tự động sau mỗi ngày streaming trong background thread của kafka_consumer.py.
 
 ## MLflow Tracking
 
-MLflow server chạy trong Docker (xem `docker-compose.yml`):
+MLflow server chạy trong Docker (xem `docker-compose.yml` root):
 - Backend: SQLite (`mlflow.db`)
 - Artifact store: `./artifacts`
 - Port: 5000
 
 ```bash
-# Start MLflow server (nếu chạy standalone, không dùng docker-compose)
-mlflow server \
-  --backend-store-uri sqlite:///mlflow.db \
-  --default-artifact-root ./artifacts \
-  --host 0.0.0.0 --port 5000
-
 # Xem MLflow UI
 open http://localhost:5000
 ```
@@ -164,7 +153,7 @@ open http://localhost:5000
 |----------|---------|-------|
 | `GCP_PROJECT_ID` | `kkbox-churn-prediction-493716` | GCP project |
 | `BQ_FEATURES_TABLE` | `kkbox-churn-prediction-493716.kkbox_gold.features_train` | BigQuery source |
-| `GCS_MODEL_BUCKET` | `kkbox-churn-prediction-493716-data` | Bucket để upload model |
+| `GCS_MODEL_BUCKET` | `kkbox-churn-prediction-493716-data` | Bucket upload model |
 | `GCS_MODEL_PREFIX` | `models/kkbox-churn-xgboost` | Prefix trong bucket |
 | `MLFLOW_TRACKING_URI` | `mlruns` | MLflow backend URI |
 | `MLFLOW_EXPERIMENT_NAME` | `kkbox-churn-xgboost` | Tên experiment |
@@ -179,4 +168,4 @@ open http://localhost:5000
 | `mlflow` | Experiment tracking |
 | `scikit-learn` | Preprocessing, metrics |
 | `feast` | Feature store definitions |
-| `shap` | SHAP explainability (dùng trong serving) |
+| `shap` | SHAP explainability |
