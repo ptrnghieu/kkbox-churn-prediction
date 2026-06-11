@@ -310,18 +310,18 @@ Dự án xây dựng thành công một hệ thống MLOps end-to-end cho bài t
 
 | Họ và tên | MSSV |
 |-----------|------|
-| | |
-| | |
-| | |
-| | |
-| | |
+|Phạm Trung Hiếu|23020070 |
+|Trương Văn Hải |23020058 |
+|Phạm Nam Khánh |23020088 |
+|Vương Nguyệt Bình|22028329|
+|Nguyễn Trường Nam |23021644 |
 
 **Giảng viên hướng dẫn:**
 
 | Vai trò | Họ và tên |
 |---------|-----------|
-| Supervisor | |
-| Supervisor | |
+| Supervisor |PGS. TS Nguyễn Ngọc Hóa |
+| Supervisor |CN. Nguyễn Thanh Sơn|
 
 ---
 
