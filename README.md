@@ -537,6 +537,146 @@ Sau mỗi ngày streaming:
 | GET | `/metrics` | Prometheus metrics |
 | GET | `/sample` | Lấy msno mẫu từ Redis |
 
+---
+
+## Triển khai Local (Không cần VM/Dataproc/Memorystore)
+
+Phương án này chạy toàn bộ compute trên máy local, chỉ dùng GCP làm storage (BigQuery + GCS — chi phí gần như bằng 0 với data < 10GB). Thích hợp cho mục đích học tập, demo, hoặc khi không muốn tốn chi phí VM.
+
+**So sánh với triển khai Cloud:**
+
+| Component | Cloud | Local |
+|-----------|-------|-------|
+| Batch Processing | Dataproc (Spark cluster) | PySpark local mode |
+| Redis | Cloud Memorystore | Docker container |
+| Serving | GCE VM | `uvicorn` local |
+| Monitoring | Docker trên VM | Docker local |
+| BigQuery | ✅ Giữ nguyên | ✅ Giữ nguyên |
+| GCS | ✅ Giữ nguyên | ✅ Giữ nguyên |
+
+### Yêu cầu
+
+- Python 3.11+
+- Docker + Docker Compose
+- Java 11+ (cho PySpark local)
+- GCP account (chỉ cần BigQuery + GCS, miễn phí với data < 10GB)
+- `gcloud auth application-default login` đã chạy
+
+### Bước 1 — Clone repo và cài dependencies
+
+```bash
+git clone https://github.com/<your-org>/kkbox-churn-prediction.git
+cd kkbox-churn-prediction
+
+cp .env.example .env
+# Chỉnh sửa .env:
+# GCP_PROJECT_ID=your-project-id
+# GCS_BUCKET=your-bucket-name
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+gcloud auth application-default login
+```
+
+### Bước 2 — Start Kafka + Redis local bằng Docker Compose
+
+```bash
+docker compose up -d kafka redis mlflow
+```
+
+Kiểm tra:
+```bash
+docker ps | grep -E "kafka|redis|mlflow"
+```
+
+### Bước 3 — Cấu hình Feature Store dùng Redis local
+
+Chỉnh `feature_store/feature_store.yaml`:
+
+```yaml
+online_store:
+  type: redis
+  connection_string: "localhost:6379"
+```
+
+### Bước 4 — Batch Processing bằng PySpark local
+
+Thay vì submit lên Dataproc, chạy trực tiếp với PySpark local mode. Cài PySpark:
+
+```bash
+pip install pyspark==3.5.0
+```
+
+Chỉnh `BUCKET` trong script để trỏ vào local path hoặc GCS, rồi chạy:
+
+```bash
+# Bronze → Silver
+python data_pipeline/processing/bronze_to_silver.py
+
+# Silver → Gold (features_train)
+python data_pipeline/processing/silver_to_gold.py
+```
+
+> **Lưu ý:** PySpark local mode dùng toàn bộ CPU trên máy. Với ~1M rows, mỗi job mất 5-15 phút tuỳ cấu hình máy.
+
+Load kết quả vào BigQuery:
+
+```bash
+bq load \
+  --source_format=PARQUET \
+  --replace \
+  kkbox_gold.features_train \
+  "gs://<YOUR_BUCKET>/gold/features_train/*.parquet"
+```
+
+### Bước 5 — Training model
+
+```bash
+python model_pipeline/training/train.py
+```
+
+### Bước 6 — Khởi tạo Feature Store
+
+```bash
+cd feature_store
+feast apply
+feast materialize-incremental $(date -u +%Y-%m-%dT%H:%M:%S)
+```
+
+### Bước 7 — Chạy FastAPI local
+
+```bash
+cd ..
+uvicorn serving_pipeline.app.main:app \
+  --host 0.0.0.0 --port 8000 --reload
+```
+
+Truy cập dashboard: **http://localhost:8000/ui/**
+
+API docs: **http://localhost:8000/docs**
+
+### Bước 8 — Monitoring local
+
+```bash
+# Tạo Docker network nếu chưa có
+docker network create churn-network 2>/dev/null || true
+
+cd monitoring_pipeline
+docker compose up -d
+```
+
+Truy cập Grafana: **http://localhost:3000** (admin / admin)
+
+### Bước 9 — Chạy Streaming Simulation
+
+Vào **http://localhost:8000/ui/** → tab **Streaming Simulation** → Click **Start**.
+
+Consumer sẽ đọc từ Kafka, tính cumulative features, ghi vào BigQuery `features_streaming` và update Redis local. Drift check tự động chạy sau 90 giây mỗi ngày.
+
+---
+
 ### Xóa tài nguyên GCP sau khi hoàn thành
 
 ```bash
