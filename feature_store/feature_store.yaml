@@ -4,10 +4,10 @@ provider: gcp
 offline_store:
   type: bigquery
 
-# online_store:
-#   type: redis
-#   connection_string: "10.80.68.19:6379"
-
 online_store:
   type: redis
-  connection_string: "localhost:6379"
+  connection_string: "10.80.68.19:6379"
+
+# online_store:
+#   type: redis
+#   connection_string: "localhost:6379"
