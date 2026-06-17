@@ -701,11 +701,11 @@ bq rm -r -f -d <PROJECT_ID>:kkbox_gold
 
 | Họ và tên | MSSV |
 |-----------|------|
-| | |
-| | |
-| | |
-| | |
-| | |
+| Phạm Trung Hiếu|23020070 |
+| Trương Văn Hải|23020058 |
+| Phạm Nam Khánh|23020088 |
+| Vương Nguyệt Bình| 22028329|
+| Nguyễn Trường Nam| 23021644|
 
 ---
 
@@ -713,5 +713,5 @@ bq rm -r -f -d <PROJECT_ID>:kkbox_gold
 
 | Vai trò | Họ và tên |
 |---------|-----------|
-| Supervisor | |
-| Supervisor | |
+| Supervisor |PGS. TS Nguyễn Ngọc Hóa |
+| Supervisor |CN. Nguyễn Thanh Sơn |
